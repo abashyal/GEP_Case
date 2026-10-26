@@ -600,7 +600,7 @@ body {
         <label>Spend threshold: <span id="spend-thresh-val">—</span></label>
         <input type="range" id="spend-thresh-slider" min="0" max="100" step="1" value="75"
                oninput="onThresholdChange()">
-        <span class="text-small text-muted">← 0th pct | 100th pct →</span>
+        <span class="text-small text-muted">← 0th percentile | 100th percentile →</span>
       </div>
     </div>
 
@@ -613,7 +613,8 @@ body {
       <div class="card-title">Supplier Battle Card</div>
       <input type="text" id="bc-search" class="search-select"
              placeholder="Type to search supplier name or ID…"
-             oninput="onBcSearch(this.value)">
+             oninput="onBcSearch(this.value)"
+             onblur="setTimeout(()=>{ document.getElementById('bc-dropdown').style.display='none'; }, 200)">
       <div id="bc-dropdown" style="display:none; max-height:220px; overflow-y:auto;
            border:1px solid var(--border); border-radius:6px; margin-top:4px; background:#fff; z-index:50; position:relative;"></div>
     </div>
@@ -691,28 +692,28 @@ body {
         <div class="card-title" style="margin-bottom:12px;">Select Scenario</div>
         <div style="display:flex; flex-direction:column; gap:10px;">
           <button class="scenario-btn" id="scen-btn-hurricane" onclick="activateScenario('hurricane')">
-            <span class="icon">🌀</span>
+            <span class="icon" style="font-size:1.2rem;">&#x26A1;</span>
             <div>
-              <div style="font-weight:700;">Gulf Coast Hurricane</div>
-              <div style="font-size:0.78rem; color:var(--muted);">Mexico, Colombia, Southern US — Logistics & Direct Materials</div>
+              <div style="font-weight:700;">Gulf of Mexico Hurricane</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Mexico &amp; Southern US — Logistics &amp; Direct Materials</div>
             </div>
           </button>
           <button class="scenario-btn" id="scen-btn-freight" onclick="activateScenario('freight')">
-            <span class="icon">🚢</span>
+            <span class="icon" style="font-size:1.2rem;">&#x2693;</span>
             <div>
               <div style="font-weight:700;">Ocean Freight Disruption</div>
               <div style="font-size:0.78rem; color:var(--muted);">Logistics suppliers — Ocean Freight sub-category</div>
             </div>
           </button>
           <button class="scenario-btn" id="scen-btn-palmoil" onclick="activateScenario('palmoil')">
-            <span class="icon">🌴</span>
+            <span class="icon" style="font-size:1.2rem;">&#x25C6;</span>
             <div>
               <div style="font-weight:700;">Palm Oil Price Spike +15%</div>
               <div style="font-size:0.78rem; color:var(--muted);">Direct Materials — Natural Oils sub-category</div>
             </div>
           </button>
           <button class="scenario-btn btn-gray" onclick="clearScenario()" style="border-color:var(--border);">
-            <span class="icon">✕</span>
+            <span class="icon" style="font-size:1.2rem;">&#x2715;</span>
             <div style="font-weight:600;">Clear Scenario</div>
           </button>
         </div>
@@ -755,6 +756,12 @@ body {
     </div>
 
     <div class="card">
+      <div class="card-title">Data Integrity Tests</div>
+      <button class="btn btn-blue" onclick="runTests()" style="margin-bottom:14px;">Run Tests</button>
+      <div id="test-results"></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Ask the Data</div>
       <input type="text" id="ask-input" placeholder='e.g. "leverage suppliers packaging lapsed contracts"…'
              oninput="onAskData(this.value)">
@@ -769,27 +776,27 @@ body {
 <!-- ════════════════════════════════ PIPELINE STRIP ══════════════════════════ -->
 <footer id="pipeline-strip">
   <div class="pipe-step active" id="pipe-1">
-    <span class="pipe-icon">📥</span>
+    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2193;</span>
     <span class="pipe-label">1. Data Input</span>
   </div>
   <span class="pipe-arrow">→</span>
   <div class="pipe-step active" id="pipe-2">
-    <span class="pipe-icon">🔍</span>
+    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2699;</span>
     <span class="pipe-label">2. AI Analysis</span>
   </div>
   <span class="pipe-arrow">→</span>
   <div class="pipe-step active" id="pipe-3">
-    <span class="pipe-icon">💡</span>
+    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2605;</span>
     <span class="pipe-label">3. Insight Generation</span>
   </div>
   <span class="pipe-arrow">→</span>
   <div class="pipe-step" id="pipe-4">
-    <span class="pipe-icon">🤝</span>
+    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2713;</span>
     <span class="pipe-label">4. Human Decision</span>
   </div>
   <span class="pipe-arrow">→</span>
   <div class="pipe-step" id="pipe-5">
-    <span class="pipe-icon">📈</span>
+    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x25B2;</span>
     <span class="pipe-label">5. Impact Tracking</span>
   </div>
   <div class="pipe-note">
@@ -815,7 +822,8 @@ const SEGMENT_COLORS = {
 const LEVERS = {
   Leverage:
     "Run competitive bid or bundle volumes across similar suppliers. " +
-    "Leverage {spend} projected spend to negotiate 10–15% unit price reduction.",
+    "Leverage {spend} projected spend to negotiate a {pct_low}–{pct_high}% unit price reduction " +
+    "(based on this supplier's savings ceiling).",
   Strategic:
     "Joint cost reduction program + index-linked long-term agreement. " +
     "Protect supply first, then optimize cost.",
@@ -829,12 +837,12 @@ const LEVERS = {
 // Scenario definitions (ASSUMPTION: country/category filter rules)
 const SCENARIOS = {
   hurricane: {
-    label:      "Gulf Coast Hurricane",
-    icon:       "🌀",
-    countries:  ["Mexico", "Colombia", "USA"],
+    label:      "Gulf of Mexico Hurricane",
+    icon:       "⚡",
+    countries:  ["Mexico", "USA"],
     categories: ["Logistics", "Direct Materials"],
     filter: (s) =>
-      s.countries.some(c => ["Mexico", "Colombia", "USA"].includes(c)) &&
+      s.countries.some(c => ["Mexico", "USA"].includes(c)) &&
       ["Logistics", "Direct Materials"].includes(s.main_category),
   },
   freight: {
@@ -998,6 +1006,8 @@ function renderKraljicChart() {
   const maxSpend   = Math.max(...allSpends);
   const minSpend   = Math.min(...allSpends);
 
+  const SEGMENT_SYMBOLS = { Leverage: "circle", Strategic: "star", Bottleneck: "diamond", Routine: "square" };
+
   // Build one trace per segment
   const segTraces = {};
   ["Leverage", "Strategic", "Bottleneck", "Routine"].forEach(seg => {
@@ -1008,8 +1018,9 @@ function renderKraljicChart() {
       mode: "markers",
       marker: {
         color: SEGMENT_COLORS[seg],
-        opacity: state.segmentFilter && state.segmentFilter !== seg ? 0.15 : 0.8,
-        line: { color: "#fff", width: 1 },
+        symbol: SEGMENT_SYMBOLS[seg],
+        opacity: state.segmentFilter && state.segmentFilter !== seg ? 0.15 : 0.85,
+        line: { color: "#fff", width: 2 },
         size: [],
       },
       type: "scatter",
@@ -1027,9 +1038,9 @@ function renderKraljicChart() {
   suppliers.forEach(s => {
     const seg  = getSegment(s);
     const t    = segTraces[seg];
-    // Scale dot size: min 8, max 40
+    // Scale dot size: min 12, max 40
     const norm = (s.projected_spend - minSpend) / (maxSpend - minSpend + 1);
-    const sz   = 8 + norm * 32;
+    const sz   = 12 + norm * 28;
 
     t.x.push(s.risk_score);
     t.y.push(s.projected_spend);
@@ -1098,7 +1109,7 @@ function renderKraljicChart() {
 
   // Update slider labels
   document.getElementById("risk-thresh-val").textContent   = state.riskThreshold;
-  document.getElementById("spend-thresh-val").textContent  = fmt.M(state.spendThreshold);
+  document.getElementById("spend-thresh-val").textContent  = "$" + (state.spendThreshold / 1e6).toFixed(2) + "M";
   document.getElementById("risk-thresh-slider").value      = state.riskThreshold;
   document.getElementById("spend-thresh-slider").value     = state.spendThresholdPct;
 }
@@ -1142,10 +1153,12 @@ function onBcSearch(query) {
 }
 
 function selectSupplier(id) {
-  document.getElementById("bc-dropdown").style.display = "none";
   const sup = APP_DATA.suppliers.find(s => s.id === id);
-  if (sup) document.getElementById("bc-search").value = sup.name;
-  openBattleCard(id);
+  if (!sup) return;
+  state.currentSupplierId = id;
+  document.getElementById("bc-search").value = sup.name;
+  document.getElementById("bc-dropdown").style.display = "none";
+  renderBattleCard(sup);   // always drive the card from the selected ID
 }
 
 function renderBattleCard(sup) {
@@ -1154,7 +1167,12 @@ function renderBattleCard(sup) {
   const delta    = ((sup.projected_spend - sup.baseline_spend) / sup.baseline_spend * 100).toFixed(1);
 
   // ── Recommended lever text
-  const leverText = LEVERS[seg].replace("{spend}", fmt.M(sup.projected_spend));
+  const savPctLow  = Math.round(sup.savings_low    / sup.projected_spend * 100);
+  const savPctHigh = Math.round(sup.savings_ceiling / sup.projected_spend * 100);
+  const leverText  = LEVERS[seg]
+    .replace("{spend}",   fmt.M(sup.projected_spend))
+    .replace("{pct_low}", savPctLow)
+    .replace("{pct_high}", savPctHigh);
 
   // ── Talking points
   const pts = [];
@@ -1172,11 +1190,32 @@ function renderBattleCard(sup) {
     );
   }
   const topItem = sup.price_items[0];
-  if (topItem && sup.total_dollar_gap > 0) {
+  const priceIndexNearParity = Math.abs(sup.price_index - 1.0) < 0.03;
+  if (priceIndexNearParity) {
+    // Within 3% of median — don't lead with overpriced language
+    if (sup.off_contract_pct === 0) {
+      pts.push(
+        `Your overall price index is <strong>${sup.price_index.toFixed(2)}</strong> — essentially ` +
+        `at the Aura internal median. Rather than a headline price reduction, let's focus on ` +
+        `locking in current rates through a multi-year agreement before spot prices drift.`
+      );
+    }
+    // If off_contract > 0, talking point 2 already covers the opening angle
+  } else if (topItem && topItem.dollar_gap > 0) {
+    const itemGapStr = fmt.K(topItem.dollar_gap);
+    const totalNote  = sup.total_dollar_gap > topItem.dollar_gap
+      ? ` Across all tracked items the total gap reaches <strong>${fmt.K(sup.total_dollar_gap)}</strong>.`
+      : "";
     pts.push(
-      `Our internal benchmark shows you are priced ` +
-      `<strong>${fmt.K(sup.total_dollar_gap)}</strong> above the Aura internal median on ` +
-      `<em>${topItem.material_description}</em>. That's our opening data point.`
+      `Our internal benchmark shows you are priced <strong>${itemGapStr}</strong> above the ` +
+      `Aura median on <em>${topItem.material_description}</em> alone.${totalNote} ` +
+      `That's our opening data point.`
+    );
+  } else if (sup.total_dollar_gap > 0) {
+    pts.push(
+      `Across all tracked items our internal benchmark shows a combined gap of ` +
+      `<strong>${fmt.K(sup.total_dollar_gap)}</strong> above the Aura median. ` +
+      `That's our opening data point.`
     );
   } else {
     pts.push(
@@ -1581,6 +1620,7 @@ function renderRiskChart() {
   const scen     = state.activeScenario ? SCENARIOS[state.activeScenario] : null;
   const affected  = scen ? new Set(suppliers.filter(scen.filter).map(s => s.id)) : new Set();
 
+  const SEGMENT_SYMBOLS_R = { Leverage: "circle", Strategic: "star", Bottleneck: "diamond", Routine: "square" };
   const segTraces = {};
   ["Leverage", "Strategic", "Bottleneck", "Routine"].forEach(seg => {
     segTraces[seg] = {
@@ -1589,9 +1629,10 @@ function renderRiskChart() {
       mode: "markers",
       marker: {
         color: [],
+        symbol: SEGMENT_SYMBOLS_R[seg],
         size:  [],
         opacity: [],
-        line: { color: "#fff", width: 1 },
+        line: { color: "#fff", width: 2 },
       },
       type: "scatter",
       hovertemplate: "<b>%{text}</b><br>Risk: %{x} | Spend: $%{y:,.0f}<extra></extra>",
@@ -1602,7 +1643,7 @@ function renderRiskChart() {
     const seg  = getSegment(s);
     const t    = segTraces[seg];
     const norm = (s.projected_spend - minSpend) / (maxSpend - minSpend + 1);
-    const sz   = 8 + norm * 32;
+    const sz   = 12 + norm * 28;
     const isAff= affected.has(s.id);
 
     t.x.push(s.risk_score);
@@ -1638,8 +1679,8 @@ function renderMethodology() {
     ["Total Baseline Spend",       fmt.M(m.total_baseline_spend),            "Spend Data sheet, Spend (USD) column",            "FACT"],
     ["Total Projected Spend",      fmt.M(m.total_projected_spend),           "Spend Data sheet, Projected Spend (USD) column",  "FACT"],
     ["Spend Increase",             fmt.M(m.total_increase),                  "Projected – Baseline",                            "FACT"],
-    ["Savings Ceiling",            fmt.M(m.savings_ceiling),                 "Σ(row projected spend × sub-category savings %)", "FACT"],
-    ["Unique Suppliers",           m.supplier_count,                         "After cleaning: strip dash suffixes, fix typo",   "FACT"],
+    ["Savings Ceiling (est.)",     fmt.M(m.savings_ceiling),                 "Σ(row projected spend × sub-category savings %)", "ESTIMATE"],
+    ["Unique Suppliers",           m.supplier_count,                         "After cleaning — ASSUMPTION-dependent: count changes if SUP4204 remap is reversed", "ASSUMPTION"],
     ["Supplier IDs before clean",  "267",                                     "Spend Data raw unique IDs",                       "FACT"],
     ["Spend Threshold (Kraljic)",  fmt.M(m.spend_threshold),                 "75th percentile of supplier projected spend",     "ASSUMPTION"],
     ["Risk Threshold (Kraljic)",   m.risk_threshold,                         "Risk score cutoff between quadrants",             "ASSUMPTION"],
@@ -1653,7 +1694,8 @@ function renderMethodology() {
     ["Price Verdict — Push back",  "Avg > 1.25× median OR top 10% of [min,max] range",  "build_data.py constant",              "ASSUMPTION"],
     ["Off-contract statuses",      "Expired, Expiring Q2/Q3 2026, Month-to-Month", "Sourcing judgment call",                   "ASSUMPTION"],
     ["Segment counts (default)",   JSON.stringify(m.segment_counts),         "75th pct spend threshold, risk ≥ 12",             "ESTIMATE"],
-    ...m.cleaning_log.map(l => ["Data Cleaning", l, "build_data.py", "FACT"]),
+    ...m.cleaning_log.map(l => ["Data Cleaning", l, "build_data.py",
+      l.includes("SUP4204") || l.includes("Remapped") ? "ASSUMPTION" : "FACT"]),
   ];
 
   const tagClass = { FACT: "tag-fact", ESTIMATE: "tag-estimate", ASSUMPTION: "tag-assumption" };
@@ -1767,6 +1809,73 @@ function onAskData(query) {
         <tbody>${rows}</tbody>
       </table>
     </div>
+  `;
+}
+
+// ── Data Integrity Tests ──────────────────────────────────────────────────────
+function runTests() {
+  const m   = APP_DATA.meta;
+  const sups = APP_DATA.suppliers;
+  const tests = [];
+
+  function check(label, actual, expected, tolerance) {
+    const pass = Math.abs(actual - expected) <= (tolerance || 0.01);
+    tests.push({ label, pass, actual, expected });
+  }
+
+  // Dashboard KPI vs raw data sums
+  const sumBaseline   = sups.reduce((s, x) => s + x.baseline_spend,   0);
+  const sumProjected  = sups.reduce((s, x) => s + x.projected_spend,  0);
+  const sumCeiling    = sups.reduce((s, x) => s + x.savings_ceiling,  0);
+  const sumIncrease   = sumProjected - sumBaseline;
+
+  check("Total baseline spend: KPI == sum of suppliers",  m.total_baseline_spend,  sumBaseline,  1);
+  check("Total projected spend: KPI == sum of suppliers", m.total_projected_spend, sumProjected, 1);
+  check("Total increase: KPI == projected – baseline",    m.total_increase,        sumIncrease,  1);
+  check("Savings ceiling: KPI == sum of suppliers",       m.savings_ceiling,       sumCeiling,   1);
+
+  // Pipeline strip consistency: total increase shown in tracker target == KPI
+  const trackerTarget = m.total_increase;
+  check("Savings tracker target == KPI increase",         trackerTarget, m.total_increase, 0);
+
+  // Segment counts at default thresholds
+  const allSpends = sups.map(s => s.projected_spend);
+  const spendThresh = percentileValue(allSpends, 75);
+  const riskThresh  = m.risk_threshold;
+  const counts = { Leverage:0, Strategic:0, Bottleneck:0, Routine:0 };
+  sups.forEach(s => {
+    const hs = s.projected_spend >= spendThresh;
+    const hr = s.risk_score      >= riskThresh;
+    const seg = hs && !hr ? "Leverage" : hs && hr ? "Strategic" : !hs && hr ? "Bottleneck" : "Routine";
+    counts[seg]++;
+  });
+  const mc = m.segment_counts;
+  check("Leverage count @ default thresholds",   counts.Leverage,   mc.Leverage,   0);
+  check("Strategic count @ default thresholds",  counts.Strategic,  mc.Strategic,  0);
+  check("Bottleneck count @ default thresholds", counts.Bottleneck, mc.Bottleneck, 0);
+  check("Routine count @ default thresholds",    counts.Routine,    mc.Routine,    0);
+
+  // Supplier count
+  check("Supplier count matches array length",   sups.length, m.supplier_count, 0);
+
+  const rows = tests.map(t =>
+    `<tr>
+       <td>${t.pass ? '<span style="color:var(--green);font-weight:700;">&#x2713; PASS</span>' : '<span style="color:var(--red);font-weight:700;">&#x2717; FAIL</span>'}</td>
+       <td>${t.label}</td>
+       <td style="font-family:monospace;font-size:0.82rem;">${typeof t.actual === 'number' ? t.actual.toFixed(2) : t.actual}</td>
+       <td style="font-family:monospace;font-size:0.82rem;">${typeof t.expected === 'number' ? t.expected.toFixed(2) : t.expected}</td>
+     </tr>`
+  ).join("");
+
+  const passed = tests.filter(t => t.pass).length;
+  document.getElementById("test-results").innerHTML = `
+    <div style="margin-bottom:8px;font-weight:700;">
+      ${passed}/${tests.length} tests passed
+    </div>
+    <table class="method-table">
+      <thead><tr><th>Result</th><th>Test</th><th>Actual</th><th>Expected</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
   `;
 }
 
