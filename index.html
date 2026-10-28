@@ -356,7 +356,7 @@ body {
 }
 
 /* Tracker table */
-.tracker-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.tracker-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; table-layout: fixed; }
 .tracker-table th {
   padding: 10px 12px;
   background: #f5f5f5;
@@ -367,7 +367,12 @@ body {
   letter-spacing: 0.5px;
   color: var(--muted);
 }
-.tracker-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+.tracker-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+.tracker-table col.col-supplier  { width: 35%; }
+.tracker-table col.col-segment   { width: 15%; }
+.tracker-table col.col-savings   { width: 18%; }
+.tracker-table col.col-status    { width: 20%; }
+.tracker-table col.col-action    { width: 12%; }
 .tracker-table tr.rejected td { opacity: 0.5; text-decoration: line-through; }
 
 /* ── Risk simulator ──────────────────────────────────────── */
@@ -485,6 +490,9 @@ body {
 
 /* ── Misc helpers ────────────────────────────────────────── */
 .text-right { text-align: right; }
+.price-table th.text-right,
+.tracker-table th.text-right,
+.method-table th.text-right { text-align: right; }
 .text-muted { color: var(--muted); }
 .text-small { font-size: 0.8rem; }
 .mt-8  { margin-top: 8px; }
@@ -539,7 +547,7 @@ body {
   <div>
     <div class="logo">GEP</div>
   </div>
-  <h1>Sourcing Command Center</h1>
+
   <div id="kpi-strip">
     <div class="kpi-card">
       <div class="kpi-label">Last-Year Spend</div>
@@ -692,28 +700,24 @@ body {
         <div class="card-title" style="margin-bottom:12px;">Select Scenario</div>
         <div style="display:flex; flex-direction:column; gap:10px;">
           <button class="scenario-btn" id="scen-btn-hurricane" onclick="activateScenario('hurricane')">
-            <span class="icon" style="font-size:1.2rem;">&#x26A1;</span>
             <div>
               <div style="font-weight:700;">Gulf of Mexico Hurricane</div>
               <div style="font-size:0.78rem; color:var(--muted);">Mexico &amp; Southern US — Logistics &amp; Direct Materials</div>
             </div>
           </button>
           <button class="scenario-btn" id="scen-btn-freight" onclick="activateScenario('freight')">
-            <span class="icon" style="font-size:1.2rem;">&#x2693;</span>
             <div>
               <div style="font-weight:700;">Ocean Freight Disruption</div>
               <div style="font-size:0.78rem; color:var(--muted);">Logistics suppliers — Ocean Freight sub-category</div>
             </div>
           </button>
           <button class="scenario-btn" id="scen-btn-palmoil" onclick="activateScenario('palmoil')">
-            <span class="icon" style="font-size:1.2rem;">&#x25C6;</span>
             <div>
               <div style="font-weight:700;">Palm Oil Price Spike +15%</div>
               <div style="font-size:0.78rem; color:var(--muted);">Direct Materials — Natural Oils sub-category</div>
             </div>
           </button>
           <button class="scenario-btn btn-gray" onclick="clearScenario()" style="border-color:var(--border);">
-            <span class="icon" style="font-size:1.2rem;">&#x2715;</span>
             <div style="font-weight:600;">Clear Scenario</div>
           </button>
         </div>
@@ -773,36 +777,6 @@ body {
 
 </main>
 
-<!-- ════════════════════════════════ PIPELINE STRIP ══════════════════════════ -->
-<footer id="pipeline-strip">
-  <div class="pipe-step active" id="pipe-1">
-    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2193;</span>
-    <span class="pipe-label">1. Data Input</span>
-  </div>
-  <span class="pipe-arrow">→</span>
-  <div class="pipe-step active" id="pipe-2">
-    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2699;</span>
-    <span class="pipe-label">2. AI Analysis</span>
-  </div>
-  <span class="pipe-arrow">→</span>
-  <div class="pipe-step active" id="pipe-3">
-    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2605;</span>
-    <span class="pipe-label">3. Insight Generation</span>
-  </div>
-  <span class="pipe-arrow">→</span>
-  <div class="pipe-step" id="pipe-4">
-    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x2713;</span>
-    <span class="pipe-label">4. Human Decision</span>
-  </div>
-  <span class="pipe-arrow">→</span>
-  <div class="pipe-step" id="pipe-5">
-    <span class="pipe-icon" style="font-family:monospace;font-size:1rem;">&#x25B2;</span>
-    <span class="pipe-label">5. Impact Tracking</span>
-  </div>
-  <div class="pipe-note">
-    Steps 1–3 are rules-based statistics (segmentation, price benchmarking, savings math). No external AI required.
-  </div>
-</footer>
 
 <!-- ═══════════════════════════════════ SCRIPTS ═══════════════════════════════ -->
 <script>
@@ -1498,8 +1472,18 @@ function renderTracker() {
 
   document.getElementById("tracker-table-wrap").innerHTML = `
     <table class="tracker-table">
+      <colgroup>
+        <col class="col-supplier"><col class="col-segment">
+        <col class="col-savings"><col class="col-status"><col class="col-action">
+      </colgroup>
       <thead>
-        <tr><th>Supplier</th><th>Segment</th><th class="text-right">Savings Amount</th><th>Status</th><th></th></tr>
+        <tr>
+          <th>Supplier</th>
+          <th>Segment</th>
+          <th class="text-right">Savings Amount</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
