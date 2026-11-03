@@ -538,6 +538,60 @@ body {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+/* ── Dashboard filters ───────────────────────────────────── */
+.dash-filters {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  align-items: center; margin-bottom: 14px;
+}
+.dash-filters label { font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
+.dash-filters select {
+  padding: 5px 10px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 0.85rem; background: #fff; cursor: pointer;
+}
+.dash-filters select:focus { outline: none; border-color: var(--blue); }
+
+/* ── Tier/Region summary table ───────────────────────────── */
+.summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+@media (max-width: 800px) { .summary-grid { grid-template-columns: 1fr; } }
+.summary-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+.summary-table th {
+  padding: 7px 10px; background: #f5f5f5;
+  border-bottom: 2px solid var(--border); text-align: left;
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted);
+}
+.summary-table td { padding: 7px 10px; border-bottom: 1px solid #f0f0f0; }
+.summary-table th.text-right, .summary-table td.text-right { text-align: right; }
+
+/* ── Concentration alert bars ────────────────────────────── */
+.conc-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.conc-bar-label { font-size: 0.82rem; color: var(--muted); width: 120px; flex-shrink: 0; }
+.conc-bar-bg { flex: 1; background: #f0f0f0; border-radius: 4px; height: 10px; overflow: hidden; }
+.conc-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
+.conc-bar-val { font-size: 0.82rem; font-weight: 700; width: 90px; text-align: right; flex-shrink: 0; }
+
+/* ── Capture-rate preset cards ───────────────────────────── */
+.preset-cards { display: flex; gap: 12px; flex-wrap: wrap; margin: 12px 0 16px; }
+.preset-card {
+  border: 2px solid var(--border); border-radius: var(--radius);
+  padding: 12px 16px; cursor: pointer; flex: 1; min-width: 180px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.preset-card:hover { border-color: var(--blue); }
+.preset-card.active { border-color: var(--blue); background: #e8f0fe; }
+.preset-card .pc-label { font-weight: 700; font-size: 0.95rem; margin-bottom: 4px; }
+.preset-card .pc-savings { font-size: 1.2rem; font-weight: 800; color: var(--green); }
+.preset-card .pc-rates { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+
+/* ── Custom scenario panel ───────────────────────────────── */
+.custom-panel {
+  display: none; background: #f8f9fa; border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px; margin-top: 10px;
+}
+.custom-panel.open { display: block; }
+.custom-checks { display: flex; flex-wrap: wrap; gap: 6px 20px; max-height: 160px; overflow-y: auto; }
+.custom-checks label { display: flex; align-items: center; gap: 6px; font-size: 0.84rem; cursor: pointer; }
+.custom-section-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 8px 0 4px; }
 </style>
 </head>
 <body>
@@ -597,6 +651,36 @@ body {
     <!-- Kraljic matrix -->
     <div class="card">
       <div class="card-title">Kraljic Matrix — Projected Spend vs. Vendor Risk Score</div>
+
+      <!-- Dashboard filters -->
+      <div class="dash-filters">
+        <label>Tier:
+          <select id="dash-tier-filter" onchange="onDashFilterChange()">
+            <option value="">All Tiers</option>
+            <option value="Tier 1">Tier 1</option>
+            <option value="Tier 2">Tier 2</option>
+            <option value="Tier 3">Tier 3</option>
+          </select>
+        </label>
+        <label>Region:
+          <select id="dash-region-filter" onchange="onDashFilterChange()">
+            <option value="">All Regions</option>
+            <option value="APAC">APAC</option>
+            <option value="Europe">Europe</option>
+            <option value="LATAM">LATAM</option>
+            <option value="North America">North America</option>
+          </select>
+        </label>
+        <label>Color by:
+          <select id="dash-colorby" onchange="onDashFilterChange()">
+            <option value="segment">Segment</option>
+            <option value="tier">Tier</option>
+            <option value="region">Region</option>
+          </select>
+        </label>
+        <button class="btn btn-gray" style="padding:5px 12px;font-size:0.82rem;" onclick="resetDashFilters()">Reset Filters</button>
+      </div>
+
       <div id="kraljic-chart" style="width:100%;height:520px;"></div>
       <div class="slider-row">
         <label>Risk threshold: <span id="risk-thresh-val">12</span></label>
@@ -610,6 +694,17 @@ body {
                oninput="onThresholdChange()">
         <span class="text-small text-muted">← 0th percentile | 100th percentile →</span>
       </div>
+    </div>
+
+    <!-- Tier & Region summary + concentration alert -->
+    <div class="card">
+      <div class="card-title">Supplier Breakdown — Tier &amp; Region</div>
+      <div class="summary-grid" id="tier-region-summary"></div>
+    </div>
+
+    <div class="card" id="conc-alert-card">
+      <div class="card-title">Direct Materials Spend — Regional Concentration</div>
+      <div id="conc-alert-content"></div>
     </div>
 
   </section>
@@ -675,6 +770,17 @@ body {
       </div>
     </div>
 
+    <!-- Capture-rate presets -->
+    <div class="card">
+      <div class="card-title">Capture Rate Presets</div>
+      <div class="info-note mb-8" style="margin-top:0;">
+        Applies a capture rate per segment to each supplier's savings ceiling to estimate realisable savings
+        under the current segmentation (thresholds above).
+      </div>
+      <div class="preset-cards" id="preset-cards"></div>
+      <div id="preset-detail" style="font-size:0.82rem;color:var(--muted);"></div>
+    </div>
+
     <div class="card">
       <div style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
         <button class="btn btn-gray" onclick="resetDecisions()">Reset All</button>
@@ -701,8 +807,8 @@ body {
         <div style="display:flex; flex-direction:column; gap:10px;">
           <button class="scenario-btn" id="scen-btn-hurricane" onclick="activateScenario('hurricane')">
             <div>
-              <div style="font-weight:700;">Gulf of Mexico Hurricane</div>
-              <div style="font-size:0.78rem; color:var(--muted);">Mexico &amp; Southern US — Logistics &amp; Direct Materials</div>
+              <div style="font-weight:700;">LATAM Regional Disruption</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Mexico &amp; Colombia — Logistics &amp; Direct Materials</div>
             </div>
           </button>
           <button class="scenario-btn" id="scen-btn-freight" onclick="activateScenario('freight')">
@@ -717,6 +823,25 @@ body {
               <div style="font-size:0.78rem; color:var(--muted);">Direct Materials — Natural Oils sub-category</div>
             </div>
           </button>
+          <button class="scenario-btn" id="scen-btn-custom" onclick="activateScenario('custom')">
+            <div>
+              <div style="font-weight:700;">Custom Scenario</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Pick countries / regions / categories</div>
+            </div>
+          </button>
+
+          <!-- Custom scenario picker -->
+          <div class="custom-panel" id="custom-scen-panel">
+            <div class="custom-section-label">Countries</div>
+            <div class="custom-checks" id="custom-country-checks"></div>
+            <div class="custom-section-label">Categories</div>
+            <div class="custom-checks" id="custom-category-checks"></div>
+            <div style="margin-top:10px;display:flex;gap:8px;">
+              <button class="btn btn-blue" style="padding:6px 14px;font-size:0.82rem;" onclick="applyCustomScenario()">Apply</button>
+              <button class="btn btn-gray"  style="padding:6px 14px;font-size:0.82rem;" onclick="clearCustomScenario()">Clear</button>
+            </div>
+          </div>
+
           <button class="scenario-btn btn-gray" onclick="clearScenario()" style="border-color:var(--border);">
             <div style="font-weight:600;">Clear Scenario</div>
           </button>
@@ -757,6 +882,15 @@ body {
           <tbody id="method-tbody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Reconciliation table -->
+    <div class="card">
+      <div class="card-title">Pipeline Reconciliation</div>
+      <div class="info-note mb-8" style="margin-top:0;">
+        Checks that key pipeline totals ($340.2M → $391.9M → $51.7M → $47.0M) match raw supplier data sums and that capture-rate preset savings are internally consistent.
+      </div>
+      <div id="reconciliation-table"></div>
     </div>
 
     <div class="card">
@@ -808,15 +942,25 @@ const LEVERS = {
     "Consolidate to fewer suppliers, standardize specifications, automate PO process.",
 };
 
+// Color palettes for tier / region color-by
+const TIER_COLORS   = { "Tier 1": "#1a73e8", "Tier 2": "#f57c00", "Tier 3": "#9e9e9e" };
+const REGION_COLORS = { APAC: "#1a73e8", Europe: "#1e8e3e", LATAM: "#f57c00", "North America": "#9c27b0" };
+
+// Capture-rate presets (ASSUMPTION: sourcing team estimates)
+const CAPTURE_PRESETS = {
+  ours:         { label: "Ours",         Leverage: 0.85, Strategic: 0.60, Bottleneck: 0.50, Routine: 0.75 },
+  conservative: { label: "Conservative", Leverage: 0.80, Strategic: 0.65, Bottleneck: 0.50, Routine: 0.40 },
+};
+
 // Scenario definitions (ASSUMPTION: country/category filter rules)
 const SCENARIOS = {
   hurricane: {
-    label:      "Gulf of Mexico Hurricane",
+    label:      "LATAM Regional Disruption",
     icon:       "⚡",
-    countries:  ["Mexico", "USA"],
+    countries:  ["Mexico", "Colombia"],
     categories: ["Logistics", "Direct Materials"],
     filter: (s) =>
-      s.countries.some(c => ["Mexico", "USA"].includes(c)) &&
+      s.countries.some(c => ["Mexico", "Colombia"].includes(c)) &&
       ["Logistics", "Direct Materials"].includes(s.main_category),
   },
   freight: {
@@ -842,16 +986,33 @@ const RISK_RESPONSES = {
   Routine:    "Monitor. Switch to alternative supplier if disruption persists >2 weeks.",
 };
 
+// ── Material-level all-supplier stats (computed once at load) ─────────────────
+const MATERIAL_STATS = (() => {
+  const map = {};
+  APP_DATA.suppliers.forEach(s => {
+    s.price_items.forEach(item => {
+      if (!map[item.material_id]) map[item.material_id] = { total_purchases: 0 };
+      map[item.material_id].total_purchases += item.purchase_count;
+    });
+  });
+  return map;
+})();
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let state = {
-  activeTab:       "dashboard",
+  activeTab:         "dashboard",
   currentSupplierId: null,
-  decisions:       {},          // supplierId → { status, amount, name, segment }
-  riskThreshold:   APP_DATA.meta.risk_threshold,
-  spendThresholdPct: 75,        // slider value (percentile)
-  spendThreshold:  APP_DATA.meta.spend_threshold,
-  activeScenario:  null,
-  segmentFilter:   null,        // for filtering matrix by segment card click
+  decisions:         {},         // supplierId → { status, amount, name, segment }
+  riskThreshold:     APP_DATA.meta.risk_threshold,
+  spendThresholdPct: 75,
+  spendThreshold:    APP_DATA.meta.spend_threshold,
+  activeScenario:    null,
+  segmentFilter:     null,
+  tierFilter:        "",         // "" = all
+  regionFilter:      "",         // "" = all
+  colorBy:           "segment",  // "segment" | "tier" | "region"
+  activePreset:      null,       // "ours" | "conservative" | null
+  customFilter:      null,       // function | null
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -926,7 +1087,7 @@ function switchTab(tabId) {
     s.classList.toggle("active", always || bc || tr);
   });
   if (tabId === "dashboard")   renderDashboard();
-  if (tabId === "tracker")     renderTracker();
+  if (tabId === "tracker")     { renderTracker(); renderPresetCards(); }
   if (tabId === "risk")        renderRiskChart();
   if (tabId === "methodology") renderMethodology();
 }
@@ -948,10 +1109,39 @@ function updateKpis() {
 function renderDashboard() {
   renderSegmentCards();
   renderKraljicChart();
+  renderTierRegionSummary();
+  renderConcentrationAlert();
+}
+
+function onDashFilterChange() {
+  state.tierFilter   = document.getElementById("dash-tier-filter").value;
+  state.regionFilter = document.getElementById("dash-region-filter").value;
+  state.colorBy      = document.getElementById("dash-colorby").value;
+  renderSegmentCards();
+  renderKraljicChart();
+  renderTierRegionSummary();
+  renderConcentrationAlert();
+}
+
+function resetDashFilters() {
+  state.tierFilter   = "";
+  state.regionFilter = "";
+  state.colorBy      = "segment";
+  state.segmentFilter = null;
+  document.getElementById("dash-tier-filter").value   = "";
+  document.getElementById("dash-region-filter").value = "";
+  document.getElementById("dash-colorby").value       = "segment";
+  renderSegmentCards();
+  renderKraljicChart();
+  renderTierRegionSummary();
+  renderConcentrationAlert();
 }
 
 function renderSegmentCards() {
-  const suppliers = APP_DATA.suppliers;
+  const suppliers = APP_DATA.suppliers.filter(s =>
+    (!state.tierFilter   || s.supplier_tier === state.tierFilter) &&
+    (!state.regionFilter || s.main_region   === state.regionFilter)
+  );
   const segs = { Leverage: {count:0, spend:0}, Strategic: {count:0, spend:0},
                  Bottleneck: {count:0, spend:0}, Routine: {count:0, spend:0} };
   suppliers.forEach(s => {
@@ -974,26 +1164,152 @@ function filterBySegment(seg) {
   renderKraljicChart();
 }
 
+function renderTierRegionSummary() {
+  const sups = APP_DATA.suppliers.filter(s =>
+    (!state.tierFilter   || s.supplier_tier === state.tierFilter) &&
+    (!state.regionFilter || s.main_region   === state.regionFilter)
+  );
+
+  function makeTable(groups, groupFn) {
+    const data = {};
+    groups.forEach(g => { data[g] = { count: 0, ly: 0, proj: 0, risk: 0 }; });
+    sups.forEach(s => {
+      const g = groupFn(s);
+      if (!data[g]) return;
+      data[g].count++;
+      data[g].ly   += s.baseline_spend;
+      data[g].proj += s.projected_spend;
+      data[g].risk += s.risk_score;
+    });
+    const rows = groups.map(g => {
+      const d   = data[g];
+      if (!d.count) return "";
+      const inc = d.ly > 0 ? ((d.proj - d.ly) / d.ly * 100).toFixed(1) + "%" : "—";
+      const avg = d.count > 0 ? (d.risk / d.count).toFixed(1) : "—";
+      return `<tr>
+        <td style="font-weight:600;">${g}</td>
+        <td class="text-right">${d.count}</td>
+        <td class="text-right">${fmt.M(d.ly)}</td>
+        <td class="text-right">${fmt.M(d.proj)}</td>
+        <td class="text-right">${inc}</td>
+        <td class="text-right">${avg}</td>
+      </tr>`;
+    }).join("");
+    return `<table class="summary-table">
+      <thead><tr>
+        <th>Group</th>
+        <th class="text-right">Suppliers</th>
+        <th class="text-right">LY Spend</th>
+        <th class="text-right">Projected</th>
+        <th class="text-right">Inc %</th>
+        <th class="text-right">Avg Risk</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  const tierTable   = makeTable(["Tier 1", "Tier 2", "Tier 3"], s => s.supplier_tier);
+  const regionTable = makeTable(["APAC", "Europe", "LATAM", "North America"], s => s.main_region);
+
+  document.getElementById("tier-region-summary").innerHTML = `
+    <div>
+      <div style="font-weight:600;margin-bottom:8px;">By Supplier Tier</div>
+      <div style="overflow-x:auto;">${tierTable}</div>
+    </div>
+    <div>
+      <div style="font-weight:600;margin-bottom:8px;">By Region</div>
+      <div style="overflow-x:auto;">${regionTable}</div>
+    </div>
+  `;
+}
+
+function renderConcentrationAlert() {
+  const sups    = APP_DATA.suppliers;
+  const dmSups  = sups.filter(s => s.main_category === "Direct Materials");
+  const dmTotal = dmSups.reduce((sum, s) => sum + s.projected_spend, 0);
+  const allTotal = sups.reduce((sum, s) => sum + s.projected_spend, 0);
+
+  const byRegion = {};
+  dmSups.forEach(s => {
+    byRegion[s.main_region] = (byRegion[s.main_region] || 0) + s.projected_spend;
+  });
+  const sorted = Object.entries(byRegion).sort((a, b) => b[1] - a[1]);
+
+  const CONC_COLORS = { LATAM: "var(--orange)", APAC: "var(--blue)", Europe: "var(--green)", "North America": "var(--gray)" };
+
+  const bars = sorted.map(([reg, spend]) => {
+    const pctOfDM    = (spend / dmTotal * 100).toFixed(0);
+    const pctOfTotal = (spend / allTotal * 100).toFixed(1);
+    const color = CONC_COLORS[reg] || "var(--gray)";
+    return `<div class="conc-bar-row">
+      <div class="conc-bar-label">${reg}</div>
+      <div class="conc-bar-bg">
+        <div class="conc-bar-fill" style="width:${pctOfDM}%;background:${color};"></div>
+      </div>
+      <div class="conc-bar-val">${pctOfDM}% of DM &nbsp;<span style="color:var(--muted);font-weight:400;">(${fmt.M(spend)}, ${pctOfTotal}% of all spend)</span></div>
+    </div>`;
+  }).join("");
+
+  const topTwo = sorted.slice(0, 2);
+  const topTwoSpend = topTwo.reduce((s, [, v]) => s + v, 0);
+  const topTwoPct   = (topTwoSpend / dmTotal * 100).toFixed(0);
+
+  document.getElementById("conc-alert-content").innerHTML = `
+    <div class="warning-note" style="margin-bottom:14px;">
+      <strong>${topTwo[0]?.[0] || "—"} + ${topTwo[1]?.[0] || "—"} account for ${topTwoPct}% of Direct Materials spend
+      (${fmt.M(topTwoSpend)}).</strong>
+      A single-region disruption to either exposes a significant share of Aura's supply base.
+    </div>
+    <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;">
+      Direct Materials total projected spend: <strong>${fmt.M(dmTotal)}</strong>
+      &nbsp;(${(dmTotal / allTotal * 100).toFixed(1)}% of all spend)
+    </div>
+    ${bars}
+  `;
+}
+
 function renderKraljicChart() {
-  const suppliers = APP_DATA.suppliers;
-  const allSpends  = suppliers.map(s => s.projected_spend);
+  const allSuppliers = APP_DATA.suppliers;
+  // Apply tier / region filters
+  const suppliers = allSuppliers.filter(s =>
+    (!state.tierFilter   || s.supplier_tier === state.tierFilter) &&
+    (!state.regionFilter || s.main_region   === state.regionFilter)
+  );
+
+  const allSpends  = allSuppliers.map(s => s.projected_spend); // use full range for size scale
   const maxSpend   = Math.max(...allSpends);
   const minSpend   = Math.min(...allSpends);
 
   const SEGMENT_SYMBOLS = { Leverage: "circle", Strategic: "star", Bottleneck: "diamond", Routine: "square" };
 
-  // Build one trace per segment
-  const segTraces = {};
-  ["Leverage", "Strategic", "Bottleneck", "Routine"].forEach(seg => {
-    segTraces[seg] = {
-      x: [], y: [], text: [], ids: [],
-      sizes: [], customdata: [],
-      name: seg,
-      mode: "markers",
+  // Determine trace groups and colors based on colorBy
+  let groupKey, colorMap, groupValues;
+  if (state.colorBy === "tier") {
+    groupKey    = s => s.supplier_tier;
+    colorMap    = TIER_COLORS;
+    groupValues = ["Tier 1", "Tier 2", "Tier 3"];
+  } else if (state.colorBy === "region") {
+    groupKey    = s => s.main_region;
+    colorMap    = REGION_COLORS;
+    groupValues = ["APAC", "Europe", "LATAM", "North America"];
+  } else {
+    groupKey    = s => getSegment(s);
+    colorMap    = SEGMENT_COLORS;
+    groupValues = ["Leverage", "Strategic", "Bottleneck", "Routine"];
+  }
+
+  // Build one trace per group
+  const traces = {};
+  groupValues.forEach(g => {
+    const seg = state.colorBy === "segment" ? g : null;
+    const sym = seg ? SEGMENT_SYMBOLS[seg] : "circle";
+    traces[g] = {
+      x: [], y: [], text: [], ids: [], customdata: [],
+      name: g, mode: "markers",
       marker: {
-        color: SEGMENT_COLORS[seg],
-        symbol: SEGMENT_SYMBOLS[seg],
-        opacity: state.segmentFilter && state.segmentFilter !== seg ? 0.15 : 0.85,
+        color:   colorMap[g] || "#9e9e9e",
+        symbol:  sym,
+        opacity: 0.85,
         line: { color: "#fff", width: 2 },
         size: [],
       },
@@ -1003,24 +1319,28 @@ function renderKraljicChart() {
         "%{customdata[0]}<br>" +
         "Projected spend: %{customdata[1]} (%{customdata[2]} of total)<br>" +
         "Risk score: %{customdata[3]} (%{customdata[4]})<br>" +
+        "Tier: %{customdata[7]} | Region: %{customdata[8]}<br>" +
         "Off-contract spend: %{customdata[5]}<br>" +
         "$%{customdata[6]} above median price<br>" +
         "<extra></extra>",
     };
   });
 
+  // Dim non-selected segment when segmentFilter active
   suppliers.forEach(s => {
     const seg  = getSegment(s);
-    const t    = segTraces[seg];
-    // Scale dot size: min 12, max 40
+    const grp  = groupKey(s);
+    const t    = traces[grp];
+    if (!t) return;
     const norm = (s.projected_spend - minSpend) / (maxSpend - minSpend + 1);
     const sz   = 12 + norm * 28;
-
+    const dimmed = state.segmentFilter && state.segmentFilter !== seg;
     t.x.push(s.risk_score);
     t.y.push(s.projected_spend);
     t.text.push(s.name);
     t.ids.push(s.id);
     t.marker.size.push(sz);
+    t.marker.opacity = dimmed ? 0.15 : 0.85; // simplification: per-trace
     t.customdata.push([
       seg + " supplier",
       fmt.M(s.projected_spend),
@@ -1029,6 +1349,8 @@ function renderKraljicChart() {
       s.risk_tier,
       fmt.pct(s.off_contract_pct),
       (s.total_dollar_gap / 1000).toFixed(0) + "K",
+      s.supplier_tier,
+      s.main_region,
     ]);
   });
 
@@ -1070,9 +1392,8 @@ function renderKraljicChart() {
     font: { family: "Segoe UI, system-ui, sans-serif", size: 13 },
   };
 
-  const traces = Object.values(segTraces);
   const chartDiv = document.getElementById("kraljic-chart");
-  Plotly.newPlot(chartDiv, traces, layout, { responsive: true, displayModeBar: false });
+  Plotly.newPlot(chartDiv, Object.values(traces), layout, { responsive: true, displayModeBar: false });
 
   // Click handler — open battle card
   chartDiv.on("plotly_click", function(data) {
@@ -1224,15 +1545,23 @@ function renderBattleCard(sup) {
      </div>`
   ).join("");
 
-  // ── Price table (top 8 items)
+  // ── Price table (top 8 items) — verdicts use 5% tolerance band
+  function getVerdict5pct(supplierAvg, median) {
+    const ratio = median > 0 ? supplierAvg / median : 1;
+    if (ratio <= 1.05) return "Fair";
+    if (ratio <= 1.25) return "Negotiate";
+    return "Push back";
+  }
   const priceRows = sup.price_items.slice(0, 8).map(item => {
-    const verdictColor = item.verdict === "Fair" ? "var(--green)" : item.verdict === "Negotiate" ? "var(--orange)" : "var(--red)";
+    const verdict      = getVerdict5pct(item.supplier_avg_price, item.median_price);
+    const verdictColor = verdict === "Fair" ? "var(--green)" : verdict === "Negotiate" ? "var(--orange)" : "var(--red)";
+    const allCount     = MATERIAL_STATS[item.material_id]?.total_purchases ?? "—";
     return `<tr>
       <td>${item.material_description}<br><span class="text-small text-muted">${item.material_id}</span></td>
       <td class="text-right">${fmt.price(item.supplier_avg_price)}</td>
       <td class="text-right">${fmt.price(item.median_price)}</td>
-      <td class="text-right">${item.purchase_count}</td>
-      <td><span style="font-weight:700; color:${verdictColor}">${item.verdict}</span></td>
+      <td class="text-right">${item.purchase_count} / ${allCount}</td>
+      <td><span style="font-weight:700; color:${verdictColor}">${verdict}</span></td>
     </tr>`;
   }).join("");
 
@@ -1330,8 +1659,8 @@ function renderBattleCard(sup) {
       <div class="info-note mb-8">
         Benchmark = Aura internal median across all ${APP_DATA.meta.supplier_count} suppliers in this dataset.
         NOT an external market price.
-        Fair: ≤ median &nbsp;|&nbsp; Negotiate: ≤ ${((1.25)*100).toFixed(0)}% of median &nbsp;|&nbsp;
-        Push back: > 125% of median or top 10% of price range (ASSUMPTION)
+        Fair: ≤ 105% of median (5% tolerance) &nbsp;|&nbsp; Negotiate: 105–125% of median &nbsp;|&nbsp;
+        Push back: > 125% of median &nbsp;(ASSUMPTION)
       </div>
       <div style="overflow-x:auto;">
         <table class="price-table">
@@ -1340,7 +1669,7 @@ function renderBattleCard(sup) {
               <th>Material</th>
               <th class="text-right">This Supplier Avg</th>
               <th class="text-right">Aura Median</th>
-              <th class="text-right"># Purchases</th>
+              <th class="text-right"># Purchases (this / all)</th>
               <th>Verdict</th>
             </tr>
           </thead>
@@ -1420,6 +1749,51 @@ function undoDecision(supId) {
   const sup = APP_DATA.suppliers.find(s => s.id === supId);
   if (state.currentSupplierId === supId && sup) renderBattleCard(sup);
   if (state.activeTab === "tracker") renderTracker();
+}
+
+// ── Capture Presets ───────────────────────────────────────────────────────────
+function computePresetSavings(presetKey) {
+  const rates = CAPTURE_PRESETS[presetKey];
+  return APP_DATA.suppliers.reduce((sum, s) => {
+    const seg  = getSegment(s);
+    const rate = rates[seg] || 0;
+    return sum + s.savings_ceiling * rate;
+  }, 0);
+}
+
+function renderPresetCards() {
+  const el = document.getElementById("preset-cards");
+  if (!el) return;
+  el.innerHTML = Object.entries(CAPTURE_PRESETS).map(([key, p]) => {
+    const savings = computePresetSavings(key);
+    const rateStr = `L:${(p.Leverage*100).toFixed(0)}% / S:${(p.Strategic*100).toFixed(0)}% / B:${(p.Bottleneck*100).toFixed(0)}% / R:${(p.Routine*100).toFixed(0)}%`;
+    const isActive = state.activePreset === key;
+    return `<div class="preset-card ${isActive ? "active" : ""}" onclick="selectPreset('${key}')">
+      <div class="pc-label">${p.label}</div>
+      <div class="pc-savings">${fmt.M(savings)}</div>
+      <div class="pc-rates">${rateStr}</div>
+    </div>`;
+  }).join("");
+
+  // Detail row
+  if (state.activePreset) {
+    const p = CAPTURE_PRESETS[state.activePreset];
+    const segs = ["Leverage", "Strategic", "Bottleneck", "Routine"];
+    const breakdown = segs.map(seg => {
+      const sups   = APP_DATA.suppliers.filter(s => getSegment(s) === seg);
+      const ceil   = sups.reduce((s, x) => s + x.savings_ceiling, 0);
+      const saving = ceil * p[seg];
+      return `${seg}: ${fmt.M(saving)} (${(p[seg]*100).toFixed(0)}% × ${fmt.M(ceil)} ceiling)`;
+    }).join(" &nbsp;·&nbsp; ");
+    document.getElementById("preset-detail").innerHTML = breakdown;
+  } else {
+    document.getElementById("preset-detail").innerHTML = "";
+  }
+}
+
+function selectPreset(key) {
+  state.activePreset = state.activePreset === key ? null : key;
+  renderPresetCards();
 }
 
 // ── Savings Tracker ───────────────────────────────────────────────────────────
@@ -1520,6 +1894,23 @@ function loadDemoDecisions() {
 
 // ── Risk Simulator ────────────────────────────────────────────────────────────
 function activateScenario(key) {
+  const customPanel = document.getElementById("custom-scen-panel");
+  if (key === "custom") {
+    // Toggle the custom panel; don't immediately run scenario
+    const isOpen = customPanel.classList.contains("open");
+    document.querySelectorAll(".scenario-btn").forEach(b => b.classList.remove("active"));
+    if (isOpen) {
+      customPanel.classList.remove("open");
+      state.activeScenario = null;
+    } else {
+      customPanel.classList.add("open");
+      initCustomScenarioPanel();
+      document.getElementById("scen-btn-custom").classList.add("active");
+      // Keep previous custom result if any
+    }
+    return;
+  }
+  customPanel.classList.remove("open");
   state.activeScenario = state.activeScenario === key ? null : key;
   document.querySelectorAll(".scenario-btn").forEach(b => b.classList.remove("active"));
   if (state.activeScenario) {
@@ -1530,6 +1921,58 @@ function activateScenario(key) {
 }
 
 function clearScenario() {
+  state.activeScenario = null;
+  state.customFilter   = null;
+  document.querySelectorAll(".scenario-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("custom-scen-panel").classList.remove("open");
+  renderRiskChart();
+  renderScenarioPanel();
+}
+
+function initCustomScenarioPanel() {
+  const sups = APP_DATA.suppliers;
+  const countries   = [...new Set(sups.flatMap(s => s.countries))].sort();
+  const categories  = [...new Set(sups.map(s => s.main_category))].sort();
+
+  document.getElementById("custom-country-checks").innerHTML =
+    countries.map(c => `<label><input type="checkbox" name="custom-country" value="${c}"> ${c}</label>`).join("");
+
+  document.getElementById("custom-category-checks").innerHTML =
+    categories.map(c => `<label><input type="checkbox" name="custom-cat" value="${c}"> ${c}</label>`).join("");
+}
+
+function applyCustomScenario() {
+  const selCountries = [...document.querySelectorAll('input[name="custom-country"]:checked')].map(e => e.value);
+  const selCats      = [...document.querySelectorAll('input[name="custom-cat"]:checked')].map(e => e.value);
+
+  if (!selCountries.length && !selCats.length) {
+    state.customFilter = null;
+  } else {
+    state.customFilter = (s) => {
+      const countryOk = !selCountries.length || s.countries.some(c => selCountries.includes(c));
+      const catOk     = !selCats.length      || selCats.includes(s.main_category);
+      return countryOk && catOk;
+    };
+  }
+
+  // Register as a dynamic scenario
+  SCENARIOS.custom = {
+    label:  "Custom Scenario",
+    icon:   "✎",
+    filter: state.customFilter || (() => false),
+  };
+
+  state.activeScenario = "custom";
+  document.querySelectorAll(".scenario-btn").forEach(b => b.classList.remove("active"));
+  document.getElementById("scen-btn-custom").classList.add("active");
+  renderRiskChart();
+  renderScenarioPanel();
+}
+
+function clearCustomScenario() {
+  document.querySelectorAll('input[name="custom-country"]').forEach(e => e.checked = false);
+  document.querySelectorAll('input[name="custom-cat"]').forEach(e => e.checked = false);
+  state.customFilter   = null;
   state.activeScenario = null;
   document.querySelectorAll(".scenario-btn").forEach(b => b.classList.remove("active"));
   renderRiskChart();
@@ -1673,9 +2116,9 @@ function renderMethodology() {
     ["Bottleneck Capture Rate",    (m.capture_rates.Bottleneck*100)+"%",     "% of savings ceiling expected to capture",        "ASSUMPTION"],
     ["Routine Capture Rate",       (m.capture_rates.Routine*100)+"%",        "% of savings ceiling expected to capture",        "ASSUMPTION"],
     ["Base Case Total Savings",    fmt.M(m.base_case_savings),               "Σ(supplier savings_ceiling × capture rate)",      "ESTIMATE"],
-    ["Price Verdict — Fair",       "Supplier avg ≤ median",                  "build_data.py constant",                          "ASSUMPTION"],
-    ["Price Verdict — Negotiate",  "Median < avg ≤ 1.25× median and not top 10% range", "build_data.py constant",              "ASSUMPTION"],
-    ["Price Verdict — Push back",  "Avg > 1.25× median OR top 10% of [min,max] range",  "build_data.py constant",              "ASSUMPTION"],
+    ["Price Verdict — Fair",       "Supplier avg ≤ 105% of median (5% tolerance band)", "client-side recompute over build_data.py raw", "ASSUMPTION"],
+    ["Price Verdict — Negotiate",  "105% < avg ≤ 125% of median",           "client-side recompute",                           "ASSUMPTION"],
+    ["Price Verdict — Push back",  "Avg > 125% of median",                  "client-side recompute",                           "ASSUMPTION"],
     ["Off-contract statuses",      "Expired, Expiring Q2/Q3 2026, Month-to-Month", "Sourcing judgment call",                   "ASSUMPTION"],
     ["Segment counts (default)",   JSON.stringify(m.segment_counts),         "75th pct spend threshold, risk ≥ 12",             "ESTIMATE"],
     ...m.cleaning_log.map(l => ["Data Cleaning", l, "build_data.py",
@@ -1692,6 +2135,76 @@ function renderMethodology() {
        <td><span class="tag ${tagClass[type]}">${type}</span></td>
      </tr>`
   ).join("");
+
+  renderReconciliation();
+}
+
+// ── Reconciliation Table ──────────────────────────────────────────────────────
+function renderReconciliation() {
+  const m    = APP_DATA.meta;
+  const sups = APP_DATA.suppliers;
+
+  // Compute actuals from raw data
+  const sumBaseline  = sups.reduce((s, x) => s + x.baseline_spend,  0);
+  const sumProjected = sups.reduce((s, x) => s + x.projected_spend, 0);
+  const sumIncrease  = sumProjected - sumBaseline;
+  const sumCeiling   = sups.reduce((s, x) => s + x.savings_ceiling, 0);
+  const suppCount    = sups.length;
+
+  // Preset savings
+  const oursSavings  = computePresetSavings("ours");
+  const consrSavings = computePresetSavings("conservative");
+
+  function row(label, expected, actual, tolerance, fmtFn) {
+    const pass  = Math.abs(actual - expected) <= (tolerance || 0.5);
+    const badge = pass
+      ? `<span style="color:var(--green);font-weight:700;">&#x2713; Match</span>`
+      : `<span style="color:var(--red);font-weight:700;">&#x2717; Mismatch</span>`;
+    return `<tr>
+      <td style="font-weight:600;">${label}</td>
+      <td style="font-family:monospace;">${fmtFn ? fmtFn(expected) : expected}</td>
+      <td style="font-family:monospace;">${fmtFn ? fmtFn(actual)   : actual}</td>
+      <td>${badge}</td>
+    </tr>`;
+  }
+
+  const html = `
+    <div style="overflow-x:auto;">
+      <table class="method-table">
+        <thead><tr>
+          <th>Checkpoint</th>
+          <th>Pipeline / Reference</th>
+          <th>Computed from Suppliers</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody>
+          ${row("Total Baseline Spend",   m.total_baseline_spend,  sumBaseline,  500, fmt.M)}
+          ${row("Total Projected Spend",  m.total_projected_spend, sumProjected, 500, fmt.M)}
+          ${row("Spend Increase",         m.total_increase,        sumIncrease,  500, fmt.M)}
+          ${row("Savings Ceiling",        m.savings_ceiling,       sumCeiling,   500, fmt.M)}
+          ${row("Supplier Count",         m.supplier_count,        suppCount,    0,   v => v)}
+          <tr style="background:#f8f9fa;">
+            <td style="font-weight:600;">Savings — Ours preset</td>
+            <td style="font-family:monospace;">—</td>
+            <td style="font-family:monospace;">${fmt.M(oursSavings)}</td>
+            <td><span style="color:var(--muted);">L:85% / S:60% / B:50% / R:75%</span></td>
+          </tr>
+          <tr style="background:#f8f9fa;">
+            <td style="font-weight:600;">Savings — Conservative preset</td>
+            <td style="font-family:monospace;">—</td>
+            <td style="font-family:monospace;">${fmt.M(consrSavings)}</td>
+            <td><span style="color:var(--muted);">L:80% / S:65% / B:50% / R:40%</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:0.78rem;color:var(--muted);margin-top:8px;">
+      Pipeline reference values: $340.2M baseline → $391.9M projected → $51.7M increase → $47.0M savings ceiling.
+      Tolerance: ±$500 for spend figures, exact match for counts.
+    </div>
+  `;
+  const el = document.getElementById("reconciliation-table");
+  if (el) el.innerHTML = html;
 }
 
 // ── Ask the Data ──────────────────────────────────────────────────────────────
@@ -1868,8 +2381,6 @@ function init() {
   loadDecisions();
   updateKpis();
   renderDashboard();
-  // Update spend threshold slider max after data is loaded
-  const allSpends = APP_DATA.suppliers.map(s => s.projected_spend);
   // Slider shows percentile; recompute on load
   state.spendThreshold = APP_DATA.meta.spend_threshold;
 }
