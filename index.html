@@ -22,7 +22,7 @@
 :root {
   --blue:    #EF6200;   /* accent — orange */
   --red:     #E05252;   /* risk / verdict red */
-  --orange:  #F59E0B;   /* amber — Bottleneck, Negotiate, warnings */
+  --orange:  #F59E0B;   /* amber — Negotiate segment, warnings */
   --gray:    #6E6E6E;   /* neutral series */
   --green:   #22C55E;   /* Fair / approved */
   --teal:    #00B4A6;   /* diversity */
@@ -189,9 +189,9 @@ body {
 .seg-card .seg-count { font-family: 'Poppins', system-ui, sans-serif; font-size: 2rem; font-weight: 800; }
 .seg-card .seg-spend { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
 .seg-card.Leverage  { border-left: 3px solid var(--blue);   } .seg-card.Leverage   .seg-title { color: var(--blue); }
-.seg-card.Strategic { border-left: 3px solid var(--red);    } .seg-card.Strategic  .seg-title { color: var(--red); }
-.seg-card.Bottleneck{ border-left: 3px solid var(--orange); } .seg-card.Bottleneck .seg-title { color: var(--orange); }
-.seg-card.Routine   { border-left: 3px solid var(--gray);   } .seg-card.Routine    .seg-title { color: var(--gray); }
+.seg-card.Negotiate { border-left: 3px solid var(--orange); } .seg-card.Negotiate  .seg-title { color: var(--orange); }
+.seg-card.High-risk { border-left: 3px solid var(--red);   } .seg-card.High-risk  .seg-title { color: var(--red); }
+.seg-card.Tail      { border-left: 3px solid var(--gray);  } .seg-card.Tail       .seg-title { color: var(--gray); }
 
 /* ── Segment badges ──────────────────────────────────────── */
 .badge {
@@ -205,9 +205,9 @@ body {
   color: #fff;
 }
 .badge-Leverage   { background: var(--blue);   color: #fff; }
-.badge-Strategic  { background: var(--red);    color: #fff; }
-.badge-Bottleneck { background: var(--orange); color: #000; }
-.badge-Routine    { background: #3A3A3A;        color: var(--secondary); }
+.badge-Negotiate  { background: var(--orange); color: #000; }
+.badge-High-risk  { background: var(--red);    color: #fff; }
+.badge-Tail       { background: #3A3A3A;        color: var(--secondary); }
 .badge-Low    { background: rgba(34,197,94,0.15);  color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
 .badge-Medium { background: rgba(245,158,11,0.15); color: var(--orange); border: 1px solid rgba(245,158,11,0.3); }
 .badge-High   { background: rgba(224,82,82,0.15);  color: var(--red);    border: 1px solid rgba(224,82,82,0.3); }
@@ -949,10 +949,10 @@ body {
 const LS_KEY = "sourcing_decisions";
 
 const SEGMENT_COLORS = {
-  Leverage:   "#EF6200",
-  Strategic:  "#E05252",
-  Bottleneck: "#F59E0B",
-  Routine:    "#6E6E6E",
+  Leverage:    "#EF6200",
+  Negotiate:   "#F59E0B",
+  "High risk": "#E05252",
+  Tail:        "#6E6E6E",
 };
 
 // Lever text per segment (ASSUMPTION: sourcing strategy rules)
@@ -961,13 +961,13 @@ const LEVERS = {
     "Run competitive bid or bundle volumes across similar suppliers. " +
     "Leverage {spend} projected spend to negotiate a {pct_low}–{pct_high}% unit price reduction " +
     "(based on this supplier's savings ceiling).",
-  Strategic:
+  Negotiate:
     "Joint cost reduction program + index-linked long-term agreement. " +
     "Protect supply first, then optimize cost.",
-  Bottleneck:
+  "High risk":
     "Secure supply continuity. Qualify a second source. " +
     "Do NOT pressure on price — supply risk outweighs cost savings here.",
-  Routine:
+  Tail:
     "Consolidate to fewer suppliers, standardize specifications, automate PO process.",
 };
 
@@ -977,8 +977,8 @@ const REGION_COLORS = { APAC: "#EF6200", Europe: "#22C55E", LATAM: "#F59E0B", "N
 
 // Capture-rate presets (ASSUMPTION: sourcing team estimates)
 const CAPTURE_PRESETS = {
-  ours:         { label: "Ours",         Leverage: 0.85, Strategic: 0.60, Bottleneck: 0.50, Routine: 0.75 },
-  conservative: { label: "Conservative", Leverage: 0.80, Strategic: 0.65, Bottleneck: 0.50, Routine: 0.40 },
+  ours:         { label: "Ours",         Leverage: 0.85, Negotiate: 0.60, "High risk": 0.50, Tail: 0.75 },
+  conservative: { label: "Conservative", Leverage: 0.80, Negotiate: 0.65, "High risk": 0.50, Tail: 0.40 },
 };
 
 // Scenario definitions (ASSUMPTION: country/category filter rules)
@@ -1009,10 +1009,10 @@ const SCENARIOS = {
 
 // Risk responses per segment
 const RISK_RESPONSES = {
-  Bottleneck: "Activate second source immediately. Assess inventory buffer.",
-  Strategic:  "Review index clause. Escalate to CPO if price exceeds contract band.",
-  Leverage:   "Demand spot price protection. Consider dual sourcing.",
-  Routine:    "Monitor. Switch to alternative supplier if disruption persists >2 weeks.",
+  "High risk": "Activate second source immediately. Assess inventory buffer.",
+  Negotiate:   "Review index clause. Escalate to CPO if price exceeds contract band.",
+  Leverage:    "Demand spot price protection. Consider dual sourcing.",
+  Tail:        "Monitor. Switch to alternative supplier if disruption persists >2 weeks.",
 };
 
 // ── Material-level all-supplier stats (computed once at load) ─────────────────
@@ -1067,14 +1067,17 @@ function percentileValue(arr, pct) {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
+// Return CSS-safe version of a segment name (replaces spaces with hyphens)
+function segCss(seg) { return seg.replace(/ /g, '-'); }
+
 // Recompute segment for a supplier given current thresholds
 function getSegment(sup) {
+  if (sup.risk_score >= state.riskThreshold) return "High risk";
   const highSpend = sup.projected_spend >= state.spendThreshold;
-  const highRisk  = sup.risk_score      >= state.riskThreshold;
-  if ( highSpend && !highRisk) return "Leverage";
-  if ( highSpend &&  highRisk) return "Strategic";
-  if (!highSpend &&  highRisk) return "Bottleneck";
-  return "Routine";
+  const lowRisk   = sup.risk_score <= APP_DATA.meta.risk_low_max;
+  if (highSpend && lowRisk)  return "Leverage";
+  if (highSpend && !lowRisk) return "Negotiate";
+  return "Tail";
 }
 
 // Load decisions from localStorage
@@ -1171,8 +1174,8 @@ function renderSegmentCards() {
     (!state.tierFilter   || s.supplier_tier === state.tierFilter) &&
     (!state.regionFilter || s.main_region   === state.regionFilter)
   );
-  const segs = { Leverage: {count:0, spend:0}, Strategic: {count:0, spend:0},
-                 Bottleneck: {count:0, spend:0}, Routine: {count:0, spend:0} };
+  const segs = { Leverage: {count:0, spend:0}, Negotiate: {count:0, spend:0},
+                 "High risk": {count:0, spend:0}, Tail: {count:0, spend:0} };
   suppliers.forEach(s => {
     const seg = getSegment(s);
     segs[seg].count++;
@@ -1180,7 +1183,7 @@ function renderSegmentCards() {
   });
   const container = document.getElementById("seg-summary-cards");
   container.innerHTML = Object.entries(segs).map(([seg, d]) =>
-    `<div class="seg-card ${seg}" onclick="filterBySegment('${seg}')">
+    `<div class="seg-card ${segCss(seg)}" onclick="filterBySegment('${seg}')">
        <div class="seg-title">${seg}</div>
        <div class="seg-count">${d.count}</div>
        <div class="seg-spend">${fmt.M(d.spend)} projected</div>
@@ -1309,7 +1312,7 @@ function renderKraljicChart() {
   const maxSpend   = Math.max(...allSpends);
   const minSpend   = Math.min(...allSpends);
 
-  const SEGMENT_SYMBOLS = { Leverage: "circle", Strategic: "star", Bottleneck: "diamond", Routine: "square" };
+  const SEGMENT_SYMBOLS = { Leverage: "circle", Negotiate: "star", "High risk": "diamond", Tail: "square" };
 
   // Determine trace groups and colors based on colorBy
   let groupKey, colorMap, groupValues;
@@ -1324,7 +1327,7 @@ function renderKraljicChart() {
   } else {
     groupKey    = s => getSegment(s);
     colorMap    = SEGMENT_COLORS;
-    groupValues = ["Leverage", "Strategic", "Bottleneck", "Routine"];
+    groupValues = ["Leverage", "Negotiate", "High risk", "Tail"];
   }
 
   // Build one trace per group
@@ -1383,13 +1386,23 @@ function renderKraljicChart() {
     ]);
   });
 
+  const riskLowMax = APP_DATA.meta.risk_low_max;  // 7: Low/Medium boundary
   const shapes = [
+    // High risk boundary (vertical, red) — default risk ≥ 14
     {
       type: "line", xref: "x", yref: "paper",
       x0: state.riskThreshold - 0.5, x1: state.riskThreshold - 0.5,
       y0: 0, y1: 1,
       line: { color: "#E05252", width: 1.5, dash: "dash" },
     },
+    // Low/Medium risk boundary (vertical, amber) — risk > 7
+    {
+      type: "line", xref: "x", yref: "paper",
+      x0: riskLowMax + 0.5, x1: riskLowMax + 0.5,
+      y0: 0, y1: 1,
+      line: { color: "#F59E0B", width: 1, dash: "dot" },
+    },
+    // Spend threshold (horizontal, orange) — $1.8M
     {
       type: "line", xref: "paper", yref: "y",
       x0: 0, x1: 1,
@@ -1399,10 +1412,10 @@ function renderKraljicChart() {
   ];
 
   const annotations = [
-    { x: state.riskThreshold * 0.6,  y: state.spendThreshold * 1.5, text: "LEVERAGE",   showarrow: false, font: { color: "#EF6200", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.6 },
-    { x: state.riskThreshold * 1.25, y: state.spendThreshold * 1.5, text: "STRATEGIC",  showarrow: false, font: { color: "#E05252", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.6 },
-    { x: state.riskThreshold * 1.25, y: state.spendThreshold * 0.5, text: "BOTTLENECK", showarrow: false, font: { color: "#F59E0B", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.6 },
-    { x: state.riskThreshold * 0.6,  y: state.spendThreshold * 0.5, text: "ROUTINE",    showarrow: false, font: { color: "#6E6E6E", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.6 },
+    { x: (4 + riskLowMax) / 2,                             y: state.spendThreshold * 1.5,  text: "LEVERAGE",   showarrow: false, font: { color: "#EF6200", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
+    { x: (riskLowMax + state.riskThreshold) / 2,           y: state.spendThreshold * 1.5,  text: "NEGOTIATE",  showarrow: false, font: { color: "#F59E0B", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
+    { x: (4 + state.riskThreshold) / 2,                    y: state.spendThreshold * 0.25, text: "TAIL",       showarrow: false, font: { color: "#6E6E6E", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
+    { x: state.riskThreshold + 2,                          y: state.spendThreshold * 0.9,  text: "HIGH RISK",  showarrow: false, font: { color: "#E05252", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
   ];
 
   const layout = {
@@ -1468,7 +1481,7 @@ function onBcSearch(query) {
           onmouseover="this.style.background='#2A2A2A'" onmouseout="this.style.background=''">
        <strong>${s.name}</strong>
        <span style="color:var(--muted); font-size:0.8rem; margin-left:8px;">${s.id}</span>
-       <span class="badge badge-${getSegment(s)}" style="margin-left:8px;">${getSegment(s)}</span>
+       <span class="badge badge-${segCss(getSegment(s))}" style="margin-left:8px;">${getSegment(s)}</span>
      </div>`
   ).join("");
   dd.style.display = "block";
@@ -1580,13 +1593,13 @@ function renderBattleCard(sup) {
     return "Push back";
   }
   const priceRows = sup.price_items.slice(0, 8).map(item => {
-    const verdict      = getVerdict5pct(item.supplier_avg_price, item.median_price);
+    const verdict      = getVerdict5pct(item.supplier_avg_price, item.avg_price);
     const verdictColor = verdict === "Fair" ? "var(--green)" : verdict === "Negotiate" ? "var(--orange)" : "var(--red)";
     const allCount     = MATERIAL_STATS[item.material_id]?.total_purchases ?? "—";
     return `<tr>
       <td>${item.material_description}<br><span class="text-small text-muted">${item.material_id}</span></td>
       <td class="text-right">${fmt.price(item.supplier_avg_price)}</td>
-      <td class="text-right">${fmt.price(item.median_price)}</td>
+      <td class="text-right">${fmt.price(item.avg_price)}</td>
       <td class="text-right">${item.purchase_count} / ${allCount}</td>
       <td><span style="font-weight:700; color:${verdictColor}">${verdict}</span></td>
     </tr>`;
@@ -1615,7 +1628,7 @@ function renderBattleCard(sup) {
             ${sup.diversity ? '<span style="color:var(--teal);font-weight:600;">✓ ' + sup.diversity + '</span>' : 'Non-diverse'}
           </div>
         </div>
-        <span class="badge badge-${seg}">${seg}</span>
+        <span class="badge badge-${segCss(seg)}">${seg}</span>
         <span class="badge badge-${sup.risk_tier}">${sup.risk_tier} Risk</span>
       </div>
       ${btnHtml}
@@ -1695,7 +1708,7 @@ function renderBattleCard(sup) {
             <tr>
               <th>Material</th>
               <th class="text-right">This Supplier Avg</th>
-              <th class="text-right">Aura Median</th>
+              <th class="text-right">Aura Avg</th>
               <th class="text-right"># Purchases (this / all)</th>
               <th>Verdict</th>
             </tr>
@@ -1793,7 +1806,7 @@ function renderPresetCards() {
   if (!el) return;
   el.innerHTML = Object.entries(CAPTURE_PRESETS).map(([key, p]) => {
     const savings = computePresetSavings(key);
-    const rateStr = `L:${(p.Leverage*100).toFixed(0)}% / S:${(p.Strategic*100).toFixed(0)}% / B:${(p.Bottleneck*100).toFixed(0)}% / R:${(p.Routine*100).toFixed(0)}%`;
+    const rateStr = `L:${(p.Leverage*100).toFixed(0)}% / N:${(p.Negotiate*100).toFixed(0)}% / H:${(p["High risk"]*100).toFixed(0)}% / T:${(p.Tail*100).toFixed(0)}%`;
     const isActive = state.activePreset === key;
     return `<div class="preset-card ${isActive ? "active" : ""}" onclick="selectPreset('${key}')">
       <div class="pc-label">${p.label}</div>
@@ -1805,7 +1818,7 @@ function renderPresetCards() {
   // Detail row
   if (state.activePreset) {
     const p = CAPTURE_PRESETS[state.activePreset];
-    const segs = ["Leverage", "Strategic", "Bottleneck", "Routine"];
+    const segs = ["Leverage", "Negotiate", "High risk", "Tail"];
     const breakdown = segs.map(seg => {
       const sups   = APP_DATA.suppliers.filter(s => getSegment(s) === seg);
       const ceil   = sups.reduce((s, x) => s + x.savings_ceiling, 0);
@@ -2048,7 +2061,7 @@ function renderScenarioPanel() {
          </div>
          <div style="text-align:right;">
            <div style="font-weight:700;">${fmt.M(s.projected_spend)}</div>
-           <span class="badge badge-${getSegment(s)}">${getSegment(s)}</span>
+           <span class="badge badge-${segCss(getSegment(s))}">${getSegment(s)}</span>
          </div>
        </div>`
     ).join("");
@@ -2074,9 +2087,9 @@ function renderRiskChart() {
   const scen     = state.activeScenario ? SCENARIOS[state.activeScenario] : null;
   const affected  = scen ? new Set(suppliers.filter(scen.filter).map(s => s.id)) : new Set();
 
-  const SEGMENT_SYMBOLS_R = { Leverage: "circle", Strategic: "star", Bottleneck: "diamond", Routine: "square" };
+  const SEGMENT_SYMBOLS_R = { Leverage: "circle", Negotiate: "star", "High risk": "diamond", Tail: "square" };
   const segTraces = {};
-  ["Leverage", "Strategic", "Bottleneck", "Routine"].forEach(seg => {
+  ["Leverage", "Negotiate", "High risk", "Tail"].forEach(seg => {
     segTraces[seg] = {
       x: [], y: [], text: [], ids: [],
       name: seg,
@@ -2111,6 +2124,7 @@ function renderRiskChart() {
 
   const shapes = [
     { type:"line", xref:"x", yref:"paper", x0:state.riskThreshold-0.5, x1:state.riskThreshold-0.5, y0:0, y1:1, line:{color:"#E05252",width:1.5,dash:"dash"} },
+    { type:"line", xref:"x", yref:"paper", x0:APP_DATA.meta.risk_low_max+0.5, x1:APP_DATA.meta.risk_low_max+0.5, y0:0, y1:1, line:{color:"#F59E0B",width:1,dash:"dot"} },
     { type:"line", xref:"paper", yref:"y", x0:0, x1:1, y0:state.spendThreshold, y1:state.spendThreshold, line:{color:"#EF6200",width:1.5,dash:"dash"} },
   ];
 
@@ -2130,27 +2144,37 @@ function renderRiskChart() {
 // ── Methodology ───────────────────────────────────────────────────────────────
 function renderMethodology() {
   const m = APP_DATA.meta;
+  const rlr = m.realization_rates || {};
   const rows = [
-    ["Total Baseline Spend",       fmt.M(m.total_baseline_spend),            "Spend Data sheet, Spend (USD) column",            "FACT"],
-    ["Total Projected Spend",      fmt.M(m.total_projected_spend),           "Spend Data sheet, Projected Spend (USD) column",  "FACT"],
-    ["Spend Increase",             fmt.M(m.total_increase),                  "Projected – Baseline",                            "FACT"],
-    ["Savings Ceiling (est.)",     fmt.M(m.savings_ceiling),                 "Σ(row projected spend × sub-category savings %)", "ESTIMATE"],
-    ["Unique Suppliers",           m.supplier_count,                         "After cleaning — ASSUMPTION-dependent: count changes if SUP4204 remap is reversed", "ASSUMPTION"],
-    ["Supplier IDs before clean",  "267",                                     "Spend Data raw unique IDs",                       "FACT"],
-    ["Spend Threshold (Kraljic)",  fmt.M(m.spend_threshold),                 "75th percentile of supplier projected spend",     "ASSUMPTION"],
-    ["Risk Threshold (Kraljic)",   m.risk_threshold,                         "Risk score cutoff between quadrants",             "ASSUMPTION"],
-    ["Leverage Capture Rate",      (m.capture_rates.Leverage*100)+"%",       "% of savings ceiling expected to capture",        "ASSUMPTION"],
-    ["Strategic Capture Rate",     (m.capture_rates.Strategic*100)+"%",      "% of savings ceiling expected to capture",        "ASSUMPTION"],
-    ["Bottleneck Capture Rate",    (m.capture_rates.Bottleneck*100)+"%",     "% of savings ceiling expected to capture",        "ASSUMPTION"],
-    ["Routine Capture Rate",       (m.capture_rates.Routine*100)+"%",        "% of savings ceiling expected to capture",        "ASSUMPTION"],
-    ["Base Case Total Savings",    fmt.M(m.base_case_savings),               "Σ(supplier savings_ceiling × capture rate)",      "ESTIMATE"],
-    ["Price Verdict — Fair",       "Supplier avg ≤ 105% of median (5% tolerance band)", "client-side recompute over build_data.py raw", "ASSUMPTION"],
-    ["Price Verdict — Negotiate",  "105% < avg ≤ 125% of median",           "client-side recompute",                           "ASSUMPTION"],
-    ["Price Verdict — Push back",  "Avg > 125% of median",                  "client-side recompute",                           "ASSUMPTION"],
-    ["Off-contract statuses",      "Expired, Expiring Q2/Q3 2026, Month-to-Month", "Sourcing judgment call",                   "ASSUMPTION"],
-    ["Segment counts (default)",   JSON.stringify(m.segment_counts),         "75th pct spend threshold, risk ≥ 12",             "ESTIMATE"],
+    ["Total Baseline Spend",        fmt.M(m.total_baseline_spend),    "Calc sheet, Last-year spend column",                  "FACT"],
+    ["Total Projected Spend",       fmt.M(m.total_projected_spend),   "Calc sheet, Projected spend column",                  "FACT"],
+    ["Spend Increase",              fmt.M(m.total_increase),          "Projected – Baseline",                                "FACT"],
+    ["Unique Suppliers",            m.supplier_count,                 "After SUP4204 → SUP2404 fix (256 total)",             "FACT"],
+    ["Case Savings Pool (ceiling)", fmt.M(m.savings_ceiling),         "Calc sheet, Case savings pool column (sum)",          "FACT"],
+    ["Lever 1: Price harmonization",fmt.M(m.l1_savings),             "3_Savings_Model: lines priced above material avg, bought at avg", "FACT"],
+    ["Lever 2: Inflation pushback", fmt.M(m.l2_savings),             "3_Savings_Model: refuse increases above sub-cat avg", "FACT"],
+    ["Lever 3: Competitive bidding",fmt.M(m.l3_savings),             "3_Savings_Model: e-auctions toward midpoint of low & avg", "FACT"],
+    ["Levers 1-3 total",            fmt.M(m.base_case_savings),       "Calc sheet, Levers 1-3 savings column (sum)",         "FACT"],
+    ["Lever 4: Tier 1 volume rebate",fmt.M(m.l4_savings),            "3_Savings_Model: 2% rebate on 50% of Tier 1 spend",   "ESTIMATE"],
+    ["Lever 5: Catalog buying",     fmt.M(m.l5_savings),             "3_Savings_Model: 10% advantage on small purchases",   "ESTIMATE"],
+    ["Official Savings Target",     fmt.M(m.official_target),        "3_Savings_Model: sum of all 5 levers",                "FACT"],
+    ["Sensitivity — Low (×0.75)",   fmt.M(m.sensitivity_low),        "All levers scaled ×0.75",                             "ESTIMATE"],
+    ["Sensitivity — Base (×1.0)",   fmt.M(m.sensitivity_base),       "All levers at face value",                            "ESTIMATE"],
+    ["Sensitivity — High (×1.25)",  fmt.M(m.sensitivity_high),       "All levers scaled ×1.25",                             "ESTIMATE"],
+    ["Realization — Open/Other",    ((rlr["Open now"]?.Other ?? 0)*100).toFixed(0)+"%",        "Lever 1 realization rate", "FACT"],
+    ["Realization — Open/High risk",((rlr["Open now"]?.["High risk"] ?? 0)*100).toFixed(0)+"%","Lever 1 realization rate", "FACT"],
+    ["Realization — Renews/Other",  ((rlr["Renews this year"]?.Other ?? 0)*100).toFixed(0)+"%","Lever 1 realization rate", "FACT"],
+    ["Realization — Locked/Other",  ((rlr["Locked (active)"]?.Other ?? 0)*100).toFixed(0)+"%","Lever 1 realization rate", "FACT"],
+    ["Spend Threshold",             fmt.M(m.spend_threshold),        "Inputs sheet — fixed at $1.8M (Leverage/Negotiate vs Tail)", "FACT"],
+    ["Risk threshold (High risk)",  m.risk_threshold,                "Inputs sheet — risk ≥ 14 → High risk segment",        "FACT"],
+    ["Risk threshold (Low/Medium)", m.risk_low_max,                  "Inputs sheet — risk ≤ 7 → Low tier (Leverage if high spend)", "FACT"],
+    ["Segment counts (default)",    JSON.stringify(m.segment_counts), "spend ≥ $1.8M + risk thresholds",                   "FACT"],
+    ["Off-contract definition",     "Open now / Renews this year",   "Contract windows that can be renegotiated",           "ASSUMPTION"],
+    ["Price Verdict — Fair",        "Supplier avg ≤ 105% of material avg", "5% tolerance band applied client-side",         "ASSUMPTION"],
+    ["Price Verdict — Negotiate",   "105% < avg ≤ 125% of material avg",   "client-side recompute",                        "ASSUMPTION"],
+    ["Price Verdict — Push back",   "Avg > 125% of material avg",          "client-side recompute",                        "ASSUMPTION"],
     ...m.cleaning_log.map(l => ["Data Cleaning", l, "build_data.py",
-      l.includes("SUP4204") || l.includes("Remapped") ? "ASSUMPTION" : "FACT"]),
+      l.includes("SUP4204") || l.includes("Remapped") ? "FACT" : "FACT"]),
   ];
 
   const tagClass = { FACT: "tag-fact", ESTIMATE: "tag-estimate", ASSUMPTION: "tag-assumption" };
@@ -2196,6 +2220,9 @@ function renderReconciliation() {
     </tr>`;
   }
 
+  // Lever sum check (L1+L2+L3 from supplier rollup vs meta)
+  const sumL1_3 = sups.reduce((s, x) => s + x.savings_target, 0);
+
   const html = `
     <div style="overflow-x:auto;">
       <table class="method-table">
@@ -2209,25 +2236,62 @@ function renderReconciliation() {
           ${row("Total Baseline Spend",   m.total_baseline_spend,  sumBaseline,  500, fmt.M)}
           ${row("Total Projected Spend",  m.total_projected_spend, sumProjected, 500, fmt.M)}
           ${row("Spend Increase",         m.total_increase,        sumIncrease,  500, fmt.M)}
-          ${row("Savings Ceiling",        m.savings_ceiling,       sumCeiling,   500, fmt.M)}
+          ${row("Case Savings Pool",      m.savings_ceiling,       sumCeiling,   500, fmt.M)}
+          ${row("Levers 1-3 Total",       m.base_case_savings,     sumL1_3,      500, fmt.M)}
           ${row("Supplier Count",         m.supplier_count,        suppCount,    0,   v => v)}
           <tr style="background:#1A1A1A;">
-            <td style="font-weight:600;">Savings — Ours preset</td>
+            <td style="font-weight:600;">Lever 1: Price harmonization</td>
+            <td style="font-family:monospace;">${fmt.M(m.l1_savings)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
+          </tr>
+          <tr style="background:#1A1A1A;">
+            <td style="font-weight:600;">Lever 2: Inflation pushback</td>
+            <td style="font-family:monospace;">${fmt.M(m.l2_savings)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
+          </tr>
+          <tr style="background:#1A1A1A;">
+            <td style="font-weight:600;">Lever 3: Competitive bidding</td>
+            <td style="font-family:monospace;">${fmt.M(m.l3_savings)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
+          </tr>
+          <tr style="background:#1A1A1A;">
+            <td style="font-weight:600;">Lever 4: Volume rebate</td>
+            <td style="font-family:monospace;">${fmt.M(m.l4_savings)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
+          </tr>
+          <tr style="background:#1A1A1A;">
+            <td style="font-weight:600;">Lever 5: Catalog buying</td>
+            <td style="font-family:monospace;">${fmt.M(m.l5_savings)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
+          </tr>
+          <tr>
+            <td style="font-weight:600;">Official Savings Target (5 levers)</td>
+            <td style="font-family:monospace;">${fmt.M(m.official_target)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--green);font-weight:700;">from 3_Savings_Model</span></td>
+          </tr>
+          <tr style="background:#1A1A1A;">
+            <td style="font-weight:600;">Savings — Ours preset (ceiling × rate)</td>
             <td style="font-family:monospace;">—</td>
             <td style="font-family:monospace;">${fmt.M(oursSavings)}</td>
-            <td><span style="color:var(--muted);">L:85% / S:60% / B:50% / R:75%</span></td>
+            <td><span style="color:var(--muted);">L:85% / N:60% / H:50% / T:75%</span></td>
           </tr>
           <tr style="background:#1A1A1A;">
             <td style="font-weight:600;">Savings — Conservative preset</td>
             <td style="font-family:monospace;">—</td>
             <td style="font-family:monospace;">${fmt.M(consrSavings)}</td>
-            <td><span style="color:var(--muted);">L:80% / S:65% / B:50% / R:40%</span></td>
+            <td><span style="color:var(--muted);">L:80% / N:65% / H:50% / T:40%</span></td>
           </tr>
         </tbody>
       </table>
     </div>
     <div style="font-size:0.78rem;color:var(--muted);margin-top:8px;">
-      Pipeline reference values: $340.2M baseline → $391.9M projected → $51.7M increase → $47.0M savings ceiling.
+      Source: Edited_Aura_Savings_Model.xlsx — $340.2M baseline → $391.9M projected → $47.0M pool → $38.0M official target.
       Tolerance: ±$500 for spend figures, exact match for counts.
     </div>
   `;
@@ -2236,7 +2300,7 @@ function renderReconciliation() {
 }
 
 // ── Ask the Data ──────────────────────────────────────────────────────────────
-const SEGMENT_KEYWORDS   = ["leverage","strategic","bottleneck","routine"];
+const SEGMENT_KEYWORDS   = ["leverage","negotiate","tail","high risk"];
 const CATEGORY_KEYWORDS  = ["direct materials","packaging","logistics","it","marketing","mro","professional services","travel"];
 const CONTRACT_KEYWORDS  = ["lapsed","expired","expiring","month-to-month","off-contract","active"];
 
@@ -2307,7 +2371,7 @@ function onAskData(query) {
     .map(s =>
       `<tr>
          <td><strong>${s.name}</strong><br><span class="text-small text-muted">${s.id}</span></td>
-         <td><span class="badge badge-${getSegment(s)}">${getSegment(s)}</span></td>
+         <td><span class="badge badge-${segCss(getSegment(s))}">${getSegment(s)}</span></td>
          <td>${s.main_category}</td>
          <td class="text-right">${fmt.M(s.projected_spend)}</td>
          <td class="text-right">${fmt.pct(s.off_contract_pct)}</td>
@@ -2363,22 +2427,27 @@ function runTests() {
   const trackerTarget = m.total_increase;
   check("Savings tracker target == KPI increase",         trackerTarget, m.total_increase, 0);
 
-  // Segment counts at default thresholds
-  const allSpends = sups.map(s => s.projected_spend);
-  const spendThresh = percentileValue(allSpends, 75);
-  const riskThresh  = m.risk_threshold;
-  const counts = { Leverage:0, Strategic:0, Bottleneck:0, Routine:0 };
+  // Segment counts at default thresholds (3-condition model)
+  const spendThresh = m.spend_threshold;    // $1.8M fixed
+  const riskHigh    = m.risk_threshold;     // 14
+  const riskLow     = m.risk_low_max;       // 7
+  const counts = { Leverage: 0, Negotiate: 0, "High risk": 0, Tail: 0 };
   sups.forEach(s => {
-    const hs = s.projected_spend >= spendThresh;
-    const hr = s.risk_score      >= riskThresh;
-    const seg = hs && !hr ? "Leverage" : hs && hr ? "Strategic" : !hs && hr ? "Bottleneck" : "Routine";
-    counts[seg]++;
+    if (s.risk_score >= riskHigh) {
+      counts["High risk"]++;
+    } else if (s.projected_spend >= spendThresh && s.risk_score <= riskLow) {
+      counts.Leverage++;
+    } else if (s.projected_spend >= spendThresh && s.risk_score > riskLow) {
+      counts.Negotiate++;
+    } else {
+      counts.Tail++;
+    }
   });
   const mc = m.segment_counts;
   check("Leverage count @ default thresholds",   counts.Leverage,   mc.Leverage,   0);
-  check("Strategic count @ default thresholds",  counts.Strategic,  mc.Strategic,  0);
-  check("Bottleneck count @ default thresholds", counts.Bottleneck, mc.Bottleneck, 0);
-  check("Routine count @ default thresholds",    counts.Routine,    mc.Routine,    0);
+  check("Negotiate count @ default thresholds",  counts.Negotiate,  mc.Negotiate,  0);
+  check("High risk count @ default thresholds",  counts["High risk"], mc["High risk"], 0);
+  check("Tail count @ default thresholds",       counts.Tail,       mc.Tail,       0);
 
   // Supplier count
   check("Supplier count matches array length",   sups.length, m.supplier_count, 0);

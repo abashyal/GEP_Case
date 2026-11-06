@@ -1,6 +1,6 @@
 """
 build_data.py — Sourcing Command Center data pipeline
-Run once to produce data.js which is loaded by index.html
+Reads Edited_Aura_Savings_Model.xlsx as source of truth.
 
 Usage:  python3 build_data.py
 Output: data.js
@@ -11,395 +11,457 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict
 
-# ─── CONFIGURABLE CONSTANTS (labeled ASSUMPTION where applicable) ─────────────
-SPEND_THRESHOLD_PERCENTILE = 75          # ASSUMPTION: Kraljic spend axis cutoff
-RISK_THRESHOLD              = 12         # ASSUMPTION: Kraljic risk axis cutoff
-
-# Savings capture rates by segment (ASSUMPTION)
-CAPTURE_RATES = {
-    "Leverage":   0.85,
-    "Strategic":  0.60,
-    "Bottleneck": 0.50,
-    "Routine":    0.75,
-}
-
-# Price verdict thresholds (ASSUMPTION)
-NEGOTIATE_MULTIPLIER = 1.25   # supplier avg > 1.0× but <= 1.25× median → Negotiate
-TOP_RANGE_PCT        = 0.10   # top 10% of [min,max] range → Push back
-
-# Contract statuses that count as "off-contract"
-OFF_CONTRACT_STATUSES = {
-    "Expired",
-    "Expiring Q2 2026",
-    "Expiring Q3 2026",
-    "Month-to-Month",
-}
-
-INPUT_FILE  = "dataset.xlsx"
+# ─── CONSTANTS ────────────────────────────────────────────────────────────────
+INPUT_FILE  = "Edited_Aura_Savings_Model.xlsx"
 OUTPUT_FILE = "data.js"
+
+# Thresholds (from Inputs sheet, confirmed)
+SPEND_THRESHOLD  = 1_800_000   # Leverage / Negotiate vs Tail boundary
+RISK_HIGH_MIN    = 14          # risk >= 14 → High risk (overrides spend)
+RISK_LOW_MAX     = 7           # risk <= 7  → Low tier (Leverage if high spend)
+
+# Price verdict thresholds
+NEGOTIATE_MULTIPLIER = 1.25    # supplier avg > mat avg but <= 1.25× → Negotiate
+TOP_RANGE_PCT        = 0.10    # top 10% of [min,max] range → Push back
+
+# Contract windows that are renegotiable (= "off-contract")
+OFF_CONTRACT_WINDOWS = {"Open now", "Renews this year"}
 
 cleaning_log = []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 1 — LOAD & CLEAN
+# STEP 1 — LOAD SHEETS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 print("=" * 60)
-print("STEP 1: Loading and cleaning data")
+print("STEP 1: Loading sheets from", INPUT_FILE)
 print("=" * 60)
 
-# ── 1a. Spend Data ────────────────────────────────────────────────────────────
-spend_raw = pd.read_excel(INPUT_FILE, sheet_name="Spend Data")
-print(f"  Spend rows loaded: {len(spend_raw):,}")
+calc_raw = pd.read_excel(INPUT_FILE, sheet_name="Calc")
+print(f"  Calc rows loaded: {len(calc_raw):,}")
 
-# ── 1b. Risk Scorecard ────────────────────────────────────────────────────────
-# Leading Unnamed:0 column → drop it; Risk Score and Risk Tier are formula
-# strings in the raw file; recompute from the 4 component columns.
-rs_raw = pd.read_excel(INPUT_FILE, sheet_name="Risk Scorecard")
-rs_raw = rs_raw.drop(columns=["Unnamed: 0"])
+raw_data = pd.read_excel(INPUT_FILE, sheet_name="Raw_Data")
+print(f"  Raw_Data rows loaded: {len(raw_data):,}")
+
+vm_raw = pd.read_excel(INPUT_FILE, sheet_name="Vendor_Master")
+print(f"  Vendor_Master rows: {len(vm_raw)}")
+
+rs_raw = pd.read_excel(INPUT_FILE, sheet_name="Risk_Scorecard")
+print(f"  Risk_Scorecard rows: {len(rs_raw)}")
+
+sm_raw = pd.read_excel(INPUT_FILE, sheet_name="3_Savings_Model", header=None)
+print(f"  3_Savings_Model loaded")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 2 — SUP4204 FIX AND JOIN CALC WITH RAW_DATA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print("\n" + "=" * 60)
+print("STEP 2: SUP4204 fix and enriching Calc with Raw_Data")
+print("=" * 60)
+
+# Fix SUP4204 → SUP2404 in Calc (12 rows with #N/A segment)
+typo_count = (calc_raw["Clean supplier ID"] == "SUP4204").sum()
+calc_raw["Clean supplier ID"] = calc_raw["Clean supplier ID"].replace("SUP4204", "SUP2404")
+cleaning_log.append(f"Remapped SUP4204 → SUP2404 in Calc ({typo_count} rows)")
+print(f"  Remapped SUP4204 → SUP2404 ({typo_count} rows in Calc)")
+
+# Join Calc with Raw_Data on Transaction ID to get Country, Payment Terms,
+# Material ID (canonical), Material Description, Spend Category
+join_cols = ["Transaction ID", "Country", "Payment Terms",
+             "Material ID", "Material Description", "Spend Category"]
+rd_lookup = raw_data[join_cols].drop_duplicates("Transaction ID").set_index("Transaction ID")
+
+calc = calc_raw.join(rd_lookup, on="Transaction ID", how="left")
+unmatched = calc["Country"].isna().sum()
+if unmatched > 0:
+    print(f"  Warning: {unmatched} Calc rows have no Raw_Data match")
+print(f"  Joined Calc with Raw_Data: {len(calc):,} rows")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 3 — BUILD LOOKUP TABLES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print("\n" + "=" * 60)
+print("STEP 3: Building lookup tables")
+print("=" * 60)
+
+# Vendor Master lookups
+vm_raw.columns = ["supplier_name", "supplier_id", "supplier_tier",
+                  "region", "risk_score_vm", "diversity"]
+id_to_name = dict(zip(vm_raw["supplier_id"], vm_raw["supplier_name"]))
+id_to_tier = dict(zip(vm_raw["supplier_id"], vm_raw["supplier_tier"]))
+id_to_region = dict(zip(vm_raw["supplier_id"], vm_raw["region"]))
+id_to_div  = dict(zip(vm_raw["supplier_id"], vm_raw["diversity"]))
+
+# Risk Scorecard lookups
 rs_raw.columns = [
-    "supplier_name", "supplier_id",
-    "risk_score_raw", "risk_tier_raw",
+    "supplier_name", "supplier_id", "risk_score_raw", "risk_tier_raw",
     "quality_risk", "service_risk", "compliance_risk", "expense_risk",
 ]
-# Recompute risk score from components (handles formula-string issue)
 rs_raw["risk_score"] = (
     rs_raw["quality_risk"].astype(int)
     + rs_raw["service_risk"].astype(int)
     + rs_raw["compliance_risk"].astype(int)
     + rs_raw["expense_risk"].astype(int)
 )
-# Recompute risk tier
+
 def compute_risk_tier(score):
-    if score <= 7:
-        return "Low"
-    elif score <= 13:
-        return "Medium"
-    else:
-        return "High"
+    if score <= 7:   return "Low"
+    elif score <= 13: return "Medium"
+    else:             return "High"
 
 rs_raw["risk_tier"] = rs_raw["risk_score"].apply(compute_risk_tier)
-print(f"  Risk Scorecard rows: {len(rs_raw)}")
 
-# ── 1c. Vendor Master ─────────────────────────────────────────────────────────
-vm_raw = pd.read_excel(INPUT_FILE, sheet_name="Vendor Master")
-vm_raw = vm_raw.drop(columns=["Unnamed: 0"])
-vm_raw.columns = [
-    "supplier_name", "supplier_id", "supplier_tier",
-    "region", "risk_score_vm", "diversity",
-]
-print(f"  Vendor Master rows: {len(vm_raw)}")
-
-# ── 1d. Savings Targets ───────────────────────────────────────────────────────
-st_raw = pd.read_excel(INPUT_FILE, sheet_name="Savings Targets")
-st_raw = st_raw.drop(columns=["Unnamed: 0"])
-st_raw.columns = ["spend_category", "sub_category", "savings_pct"]
-print(f"  Savings Targets rows: {len(st_raw)}")
-
-# ── 1e. Clean Supplier IDs ────────────────────────────────────────────────────
-def clean_supplier_id(sid):
-    """Strip dash suffixes (e.g. SUP1328-L → SUP1328)."""
-    s = str(sid).strip()
-    if "-" in s:
-        s = s.split("-")[0]
-    return s
-
-# Apply to spend data
-dash_before = spend_raw["Supplier ID"].nunique()
-spend_raw["Supplier ID"] = spend_raw["Supplier ID"].apply(clean_supplier_id)
-dash_after = spend_raw["Supplier ID"].nunique()
-cleaning_log.append(
-    f"Stripped dash suffixes from Supplier IDs: {dash_before} → {dash_after} unique IDs in spend data"
-)
-print(f"  After dash-strip: {dash_before} → {dash_after} unique supplier IDs")
-
-# Fix typo SUP4204 → SUP2404
-typo_count = (spend_raw["Supplier ID"] == "SUP4204").sum()
-spend_raw["Supplier ID"] = spend_raw["Supplier ID"].replace("SUP4204", "SUP2404")
-cleaning_log.append(
-    f"Remapped typo SUP4204 → SUP2404 ({typo_count} rows affected)"
-)
-print(f"  Remapped SUP4204 → SUP2404 ({typo_count} rows)")
-
-# Apply same cleaning to Risk Scorecard and Vendor Master
-rs_raw["supplier_id"] = rs_raw["supplier_id"].apply(clean_supplier_id)
-vm_raw["supplier_id"] = vm_raw["supplier_id"].apply(clean_supplier_id)
-
-# ── 1f. Build canonical name map from Vendor Master ──────────────────────────
-# Vendor Master is the source of truth for supplier names
-id_to_name  = dict(zip(vm_raw["supplier_id"], vm_raw["supplier_name"]))
-id_to_tier  = dict(zip(vm_raw["supplier_id"], vm_raw["supplier_tier"]))
-id_to_div   = dict(zip(vm_raw["supplier_id"], vm_raw["diversity"]))
-
-# Build Risk Scorecard lookup
 id_to_risk = {}
 for _, row in rs_raw.iterrows():
     id_to_risk[row["supplier_id"]] = {
-        "risk_score":       int(row["risk_score"]),
-        "risk_tier":        row["risk_tier"],
-        "quality_risk":     int(row["quality_risk"]),
-        "service_risk":     int(row["service_risk"]),
-        "compliance_risk":  int(row["compliance_risk"]),
-        "expense_risk":     int(row["expense_risk"]),
+        "risk_score":      int(row["risk_score"]),
+        "risk_tier":       row["risk_tier"],
+        "quality_risk":    int(row["quality_risk"]),
+        "service_risk":    int(row["service_risk"]),
+        "compliance_risk": int(row["compliance_risk"]),
+        "expense_risk":    int(row["expense_risk"]),
     }
 
-# Build savings target lookup (sub_category → savings_pct)
-savings_lookup = dict(zip(st_raw["sub_category"], st_raw["savings_pct"]))
+print(f"  Vendor Master: {len(id_to_name)} suppliers")
+print(f"  Risk Scorecard: {len(id_to_risk)} suppliers")
 
-print(f"  Unique cleaned IDs in spend data: {spend_raw['Supplier ID'].nunique()}")
-cleaning_log.append(
-    f"Canonical supplier names sourced from Vendor Master ({len(vm_raw)} entries)"
-)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 2 — CHECKPOINTS
+# STEP 4 — CHECKPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 print("\n" + "=" * 60)
-print("STEP 2: Checkpoints")
+print("STEP 4: Checkpoints")
 print("=" * 60)
 
-total_baseline  = spend_raw["Spend (USD)"].sum()
-total_projected = spend_raw["Projected Spend (USD)"].sum()
-total_increase  = total_projected - total_baseline
+total_baseline  = calc["Last-year spend"].sum()
+total_projected = calc["Projected spend"].sum()
+total_pool      = calc["Case savings pool"].sum()
+total_l1_3      = calc["Levers 1-3 savings"].sum()
+unique_suppliers = calc["Clean supplier ID"].nunique()
 
-# Savings ceiling: for each transaction, look up its sub-category savings %
-# then multiply by that row's Projected Spend (USD)
-spend_raw["_savings_pct"] = spend_raw["Sub-Category"].map(savings_lookup).fillna(0)
-spend_raw["_savings_row"]  = spend_raw["Projected Spend (USD)"] * spend_raw["_savings_pct"]
-savings_ceiling = spend_raw["_savings_row"].sum()
+print(f"  Unique suppliers in Calc:  {unique_suppliers}")
+print(f"  LY spend:                  ${total_baseline:,.0f}  (~${total_baseline/1e6:.2f}M)")
+print(f"  Projected spend:           ${total_projected:,.0f}  (~${total_projected/1e6:.2f}M)")
+print(f"  Case savings pool:         ${total_pool:,.0f}  (~${total_pool/1e6:.2f}M)")
+print(f"  Levers 1-3 savings:        ${total_l1_3:,.0f}  (~${total_l1_3/1e6:.2f}M)")
 
-unique_suppliers = spend_raw["Supplier ID"].nunique()
-
-print(f"  Total baseline spend:  ${total_baseline:,.0f}  (~${total_baseline/1e6:.1f}M)")
-print(f"  Total projected spend: ${total_projected:,.0f}  (~${total_projected/1e6:.1f}M)")
-print(f"  Increase:              ${total_increase:,.0f}  (~${total_increase/1e6:.1f}M)")
-print(f"  Savings ceiling:       ${savings_ceiling:,.0f}  (~${savings_ceiling/1e6:.1f}M)")
-print(f"  Unique supplier IDs:   {unique_suppliers}")
-
-assert abs(total_baseline  - 340_233_937) < 1e4, f"Baseline mismatch: {total_baseline}"
-assert abs(total_projected - 391_942_017) < 1e4, f"Projected mismatch: {total_projected}"
 assert unique_suppliers == 256, f"Expected 256 suppliers, got {unique_suppliers}"
+assert abs(total_baseline  - 340_233_937) < 1e5, f"LY spend mismatch: {total_baseline}"
+assert abs(total_projected - 391_942_017) < 1e5, f"Projected spend mismatch: {total_projected}"
+assert abs(total_pool      -  47_000_000) < 1e6, f"Pool mismatch: {total_pool}"
+assert abs(total_l1_3      -  35_900_000) < 2e5, f"L1-3 mismatch: {total_l1_3}"
 print("  ✓ All checkpoints passed")
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 3 — PER-SUPPLIER AGGREGATION
+# STEP 5 — MATERIAL STATS (using Material avg price from Calc)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 print("\n" + "=" * 60)
-print("STEP 3: Per-supplier aggregation")
+print("STEP 5: Material stats")
 print("=" * 60)
 
-# ── 3a. Material-level median prices (global, across all suppliers) ───────────
-# Weighted average unit price per material × supplier, then median across suppliers
-mat_group = spend_raw.groupby("Material ID")
 mat_stats = {}
-for mat_id, grp in mat_group:
-    prices  = grp["Unit Price"].values
-    qtys    = grp["Quantity"].values
-    mat_stats[mat_id] = {
-        "description":    grp["Material Description"].iloc[0],
-        "median_price":   float(np.median(prices)),
-        "p90_price":      float(np.percentile(prices, 90)),
+for mat_id, grp in calc.groupby("Material ID"):
+    if pd.isna(mat_id):
+        continue
+    # Material avg price is the Excel-computed reference price (same for all rows)
+    mat_avg_price = float(grp["Material avg price"].iloc[0])
+    mat_low_price = float(grp["Material lowest price"].iloc[0])
+    prices = grp["Unit price"].values
+
+    desc_col = grp["Material Description"].dropna()
+    description = desc_col.iloc[0] if not desc_col.empty else str(mat_id)
+
+    mat_stats[str(mat_id)] = {
+        "description":      str(description),
+        "avg_price":        mat_avg_price,
+        "lowest_price":     mat_low_price,
         "price_range_low":  float(prices.min()),
         "price_range_high": float(prices.max()),
-        "purchase_count": int(len(grp)),
+        "purchase_count":   int(len(grp)),
     }
 
-# ── 3b. Supplier-level aggregation ───────────────────────────────────────────
+print(f"  Built stats for {len(mat_stats)} materials")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 6 — SEGMENTATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_segment(proj_spend, risk_score):
+    """3-condition segmentation matching the Excel model thresholds."""
+    if risk_score >= RISK_HIGH_MIN:
+        return "High risk"
+    if proj_spend >= SPEND_THRESHOLD and risk_score <= RISK_LOW_MAX:
+        return "Leverage"
+    if proj_spend >= SPEND_THRESHOLD and risk_score > RISK_LOW_MAX:
+        return "Negotiate"
+    return "Tail"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 7 — PER-SUPPLIER AGGREGATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print("\n" + "=" * 60)
+print("STEP 7: Per-supplier aggregation")
+print("=" * 60)
+
 supplier_records = []
-supplier_ids = sorted(spend_raw["Supplier ID"].unique())
+supplier_ids = sorted(calc["Clean supplier ID"].unique())
 
 for sup_id in supplier_ids:
-    grp = spend_raw[spend_raw["Supplier ID"] == sup_id]
+    grp = calc[calc["Clean supplier ID"] == sup_id]
 
-    # ── Basic spend ──────────────────────────────────────────────────────────
-    baseline_spend  = float(grp["Spend (USD)"].sum())
-    projected_spend = float(grp["Projected Spend (USD)"].sum())
-    savings_ceil_sup= float(grp["_savings_row"].sum())
+    # ── Spend ────────────────────────────────────────────────────────────────
+    baseline_spend  = float(grp["Last-year spend"].sum())
+    projected_spend = float(grp["Projected spend"].sum())
+    savings_pool    = float(grp["Case savings pool"].sum())
+    savings_l1_3    = float(grp["Levers 1-3 savings"].sum())
 
-    # ── Risk data ────────────────────────────────────────────────────────────
+    # ── Risk data (from Risk Scorecard) ─────────────────────────────────────
     risk_data = id_to_risk.get(sup_id, {
-        "risk_score": 0, "risk_tier": "Unknown",
+        "risk_score": int(grp["Risk score"].median()),
+        "risk_tier":  compute_risk_tier(int(grp["Risk score"].median())),
         "quality_risk": 0, "service_risk": 0,
         "compliance_risk": 0, "expense_risk": 0,
     })
 
+    # ── Segment ──────────────────────────────────────────────────────────────
+    segment = compute_segment(projected_spend, risk_data["risk_score"])
+
     # ── Main category (by spend) ─────────────────────────────────────────────
-    cat_spend = grp.groupby("Spend Category")["Spend (USD)"].sum()
+    cat_spend = grp.groupby("Category")["Projected spend"].sum()
     main_category = str(cat_spend.idxmax()) if not cat_spend.empty else "Unknown"
 
-    # ── Main region (by spend) ───────────────────────────────────────────────
-    reg_spend = grp.groupby("Region")["Spend (USD)"].sum()
-    main_region = str(reg_spend.idxmax()) if not reg_spend.empty else "Unknown"
+    # ── Region (from Vendor Master, authoritative per supplier) ──────────────
+    main_region = str(id_to_region.get(sup_id, "Unknown"))
 
-    # ── Off-contract % ───────────────────────────────────────────────────────
-    off_contract_spend = grp[grp["Contract Status"].isin(OFF_CONTRACT_STATUSES)]["Spend (USD)"].sum()
-    off_contract_pct   = float(off_contract_spend / baseline_spend) if baseline_spend > 0 else 0.0
+    # ── Off-contract % (contract window is Open now or Renews this year) ────
+    off_contract_spend = grp[
+        grp["Contract window"].isin(OFF_CONTRACT_WINDOWS)
+    ]["Projected spend"].sum()
+    off_contract_pct = float(off_contract_spend / projected_spend) if projected_spend > 0 else 0.0
 
-    # ── Contract status mix ──────────────────────────────────────────────────
-    cs_mix = grp.groupby("Contract Status")["Spend (USD)"].sum().to_dict()
+    # ── Contract window mix (by projected spend) ─────────────────────────────
+    cs_mix = grp.groupby("Contract window")["Projected spend"].sum().to_dict()
     cs_mix = {k: float(v) for k, v in cs_mix.items()}
 
-    # ── Payment terms mix ────────────────────────────────────────────────────
-    pt_mix = grp.groupby("Payment Terms")["Spend (USD)"].sum().to_dict()
-    pt_mix = {k: float(v) for k, v in pt_mix.items()}
-
-    # ── Price index ──────────────────────────────────────────────────────────
-    # Weighted avg unit price this supplier / weighted avg unit price same materials globally
-    sup_mat_grp = grp.groupby("Material ID").apply(
-        lambda x: pd.Series({
-            "sup_avg_price": float(np.average(x["Unit Price"], weights=x["Quantity"])),
-            "total_qty":     float(x["Quantity"].sum()),
-            "total_spend":   float(x["Spend (USD)"].sum()),
-        }),
-        include_groups=False,
-    ).reset_index()
-
-    # Global weighted avg for those same materials
-    sup_weighted_sum = 0.0
-    glob_weighted_sum = 0.0
-    total_qty_all = 0.0
-    for _, mrow in sup_mat_grp.iterrows():
-        mid = mrow["Material ID"]
-        qty = mrow["total_qty"]
-        sup_weighted_sum  += mrow["sup_avg_price"] * qty
-        # Global median as reference
-        glob_weighted_sum += mat_stats[mid]["median_price"] * qty
-        total_qty_all += qty
-
-    if glob_weighted_sum > 0:
-        price_index = float(sup_weighted_sum / glob_weighted_sum)
+    # ── Payment terms mix (by projected spend, from Raw_Data join) ───────────
+    if "Payment Terms" in grp.columns:
+        pt_mix = grp.groupby("Payment Terms")["Projected spend"].sum().dropna().to_dict()
+        pt_mix = {str(k): float(v) for k, v in pt_mix.items() if pd.notna(k)}
     else:
-        price_index = 1.0
+        pt_mix = {}
 
     # ── Per-material price items ──────────────────────────────────────────────
     price_items = []
     total_dollar_gap = 0.0
 
-    for _, mrow in sup_mat_grp.iterrows():
-        mid       = mrow["Material ID"]
-        ms        = mat_stats[mid]
-        sup_avg   = mrow["sup_avg_price"]
-        med_price = ms["median_price"]
-        rng_low   = ms["price_range_low"]
-        rng_high  = ms["price_range_high"]
-        total_qty = mrow["total_qty"]
+    for mat_id_val, mgrp in grp.groupby("Material ID"):
+        if pd.isna(mat_id_val):
+            continue
+        mid_str = str(mat_id_val)
+        ms = mat_stats.get(mid_str)
+        if ms is None:
+            continue
 
-        # Price verdict
-        top_10_threshold = rng_high - TOP_RANGE_PCT * (rng_high - rng_low)
-        if sup_avg <= med_price:
+        # Weighted avg unit price for this supplier × material
+        quantities = mgrp["Quantity"].values
+        prices     = mgrp["Unit price"].values
+        total_qty  = float(quantities.sum())
+        total_proj = float(mgrp["Projected spend"].sum())
+
+        if total_qty > 0:
+            sup_avg_price = float(np.average(prices, weights=quantities))
+        else:
+            sup_avg_price = float(prices.mean()) if len(prices) > 0 else 0.0
+
+        mat_avg  = ms["avg_price"]
+        rng_low  = ms["price_range_low"]
+        rng_high = ms["price_range_high"]
+
+        # Verdict
+        top_threshold = rng_high - TOP_RANGE_PCT * (rng_high - rng_low)
+        if sup_avg_price <= mat_avg:
             verdict = "Fair"
-        elif sup_avg <= NEGOTIATE_MULTIPLIER * med_price and sup_avg < top_10_threshold:
+        elif sup_avg_price <= NEGOTIATE_MULTIPLIER * mat_avg and sup_avg_price < top_threshold:
             verdict = "Negotiate"
         else:
             verdict = "Push back"
 
-        dollar_gap = max(0.0, (sup_avg - med_price) * total_qty)
+        dollar_gap = max(0.0, (sup_avg_price - mat_avg) * total_qty)
         total_dollar_gap += dollar_gap
 
+        desc_col = mgrp["Material Description"].dropna()
+        mat_desc = desc_col.iloc[0] if not desc_col.empty else ms["description"]
+
         price_items.append({
-            "material_id":          mid,
-            "material_description": ms["description"],
-            "spend":                round(mrow["total_spend"], 2),
-            "supplier_avg_price":   round(sup_avg, 4),
-            "median_price":         round(med_price, 4),
-            "purchase_count":       ms["purchase_count"],
+            "material_id":          mid_str,
+            "material_description": str(mat_desc),
+            "spend":                round(total_proj, 2),
+            "supplier_avg_price":   round(sup_avg_price, 4),
+            "avg_price":            round(mat_avg, 4),
+            "purchase_count":       int(len(mgrp)),
             "verdict":              verdict,
             "dollar_gap":           round(dollar_gap, 2),
         })
 
-    # Sort by spend descending, keep top 8 for battle card
     price_items.sort(key=lambda x: x["spend"], reverse=True)
     top_price_items = price_items[:8]
 
+    # ── Price index (supplier avg / material avg, qty-weighted) ──────────────
+    sup_price_sum  = sum(pi["supplier_avg_price"] * pi["purchase_count"] for pi in price_items)
+    glob_price_sum = sum(pi["avg_price"]          * pi["purchase_count"] for pi in price_items)
+    total_px_count = sum(pi["purchase_count"] for pi in price_items)
+    if glob_price_sum > 0:
+        price_index = float(sup_price_sum / glob_price_sum)
+    else:
+        price_index = 1.0
+
     # ── Countries ────────────────────────────────────────────────────────────
-    countries = sorted(grp["Country"].dropna().unique().tolist())
+    if "Country" in grp.columns:
+        countries = sorted(grp["Country"].dropna().unique().tolist())
+    else:
+        countries = []
+
+    # ── Spend category breakdown (for concentration panel) ───────────────────
+    if "Spend Category" in grp.columns:
+        sc_mix = grp.groupby("Spend Category")["Projected spend"].sum().to_dict()
+        sc_mix = {str(k): float(v) for k, v in sc_mix.items() if pd.notna(k)}
+    else:
+        sc_mix = {}
 
     supplier_records.append({
-        "id":               sup_id,
-        "name":             id_to_name.get(sup_id, grp["Supplier Name"].iloc[0]),
-        "baseline_spend":   round(baseline_spend, 2),
-        "projected_spend":  round(projected_spend, 2),
-        "spend_share_pct":  round(baseline_spend / total_baseline * 100, 4),
-        "savings_ceiling":  round(savings_ceil_sup, 2),
-        "risk_score":       risk_data["risk_score"],
-        "risk_tier":        risk_data["risk_tier"],
-        "quality_risk":     risk_data["quality_risk"],
-        "service_risk":     risk_data["service_risk"],
-        "compliance_risk":  risk_data["compliance_risk"],
-        "expense_risk":     risk_data["expense_risk"],
-        "main_category":    main_category,
-        "main_region":      main_region,
-        "supplier_tier":    id_to_tier.get(sup_id, "Unknown"),
-        "diversity":        id_to_div.get(sup_id, None),
-        "off_contract_pct": round(off_contract_pct, 4),
-        "contract_status_mix": cs_mix,
-        "payment_terms_mix":   pt_mix,
-        "price_index":      round(price_index, 4),
-        "total_dollar_gap": round(total_dollar_gap, 2),
-        "countries":        countries,
-        "price_items":      top_price_items,
+        "id":                   sup_id,
+        "name":                 id_to_name.get(sup_id, sup_id),
+        "baseline_spend":       round(baseline_spend, 2),
+        "projected_spend":      round(projected_spend, 2),
+        "spend_share_pct":      round(baseline_spend / total_baseline * 100, 4),
+        "savings_ceiling":      round(savings_pool, 2),
+        "savings_target":       round(savings_l1_3, 2),
+        "savings_low":          round(savings_l1_3 * 0.75, 2),
+        "savings_high":         round(savings_l1_3 * 1.25, 2),
+        "risk_score":           risk_data["risk_score"],
+        "risk_tier":            risk_data["risk_tier"],
+        "quality_risk":         risk_data["quality_risk"],
+        "service_risk":         risk_data["service_risk"],
+        "compliance_risk":      risk_data["compliance_risk"],
+        "expense_risk":         risk_data["expense_risk"],
+        "segment":              segment,
+        "main_category":        main_category,
+        "main_region":          main_region,
+        "supplier_tier":        str(id_to_tier.get(sup_id, "Unknown")),
+        "diversity":            id_to_div.get(sup_id),
+        "off_contract_pct":     round(off_contract_pct, 4),
+        "contract_status_mix":  cs_mix,
+        "payment_terms_mix":    pt_mix,
+        "spend_category_mix":   sc_mix,
+        "price_index":          round(price_index, 4),
+        "total_dollar_gap":     round(total_dollar_gap, 2),
+        "countries":            countries,
+        "price_items":          top_price_items,
     })
 
 print(f"  Built records for {len(supplier_records)} suppliers")
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 4 — SEGMENTATION (KRALJIC)
+# STEP 8 — SEGMENT COUNT PASS/FAIL CHECK
 # ═══════════════════════════════════════════════════════════════════════════════
 
 print("\n" + "=" * 60)
-print("STEP 4: Segmentation (Kraljic matrix)")
+print("STEP 8: Segment count PASS/FAIL check")
 print("=" * 60)
-
-projected_spends = [r["projected_spend"] for r in supplier_records]
-spend_threshold  = float(np.percentile(projected_spends, SPEND_THRESHOLD_PERCENTILE))
-print(f"  Spend threshold ({SPEND_THRESHOLD_PERCENTILE}th percentile): ${spend_threshold:,.0f}")
-print(f"  Risk threshold: {RISK_THRESHOLD}")
 
 segment_counts = defaultdict(int)
 for rec in supplier_records:
-    high_spend = rec["projected_spend"] >= spend_threshold
-    high_risk  = rec["risk_score"]      >= RISK_THRESHOLD
+    segment_counts[rec["segment"]] += 1
 
-    if high_spend and not high_risk:
-        seg = "Leverage"
-    elif high_spend and high_risk:
-        seg = "Strategic"
-    elif not high_spend and high_risk:
-        seg = "Bottleneck"
-    else:
-        seg = "Routine"
+EXPECTED_COUNTS = {
+    "Leverage":  13,
+    "Negotiate": 51,
+    "Tail":      163,
+    "High risk": 29,
+}
 
-    rec["segment"] = seg
-    # Savings plan
-    cr = CAPTURE_RATES[seg]
-    rec["savings_low"]    = round(rec["savings_ceiling"] * 0.5, 2)
-    rec["savings_high"]   = round(rec["savings_ceiling"] * 1.0, 2)
-    rec["savings_target"] = round(rec["savings_ceiling"] * cr,  2)
-    segment_counts[seg]  += 1
+all_pass = True
+for seg, expected in EXPECTED_COUNTS.items():
+    actual = segment_counts.get(seg, 0)
+    status = "PASS" if actual == expected else "FAIL"
+    if status == "FAIL":
+        all_pass = False
+    print(f"  {status}  {seg:12s}: expected {expected:3d}, got {actual:3d}")
 
-print(f"  Segment counts: {dict(segment_counts)}")
-print(f"  (Expected approximately: Leverage ~48, Strategic ~16, Bottleneck ~88, Routine ~104)")
+if all_pass:
+    print("  ✓ All segment counts match")
+else:
+    print("  ✗ Segment count mismatch — check thresholds")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# STEP 5 — SAVINGS PLAN TOTALS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-base_case_savings = sum(r["savings_target"] for r in supplier_records)
-print(f"\n  Base case total savings: ${base_case_savings:,.0f}  (~${base_case_savings/1e6:.1f}M)")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 6 — SAVINGS TARGETS AND SUB-CATEGORY SPEND
+# STEP 9 — READ HEADLINE NUMBERS FROM 3_Savings_Model
+# ═══════════════════════════════════════════════════════════════════════════════
+
+print("\n" + "=" * 60)
+print("STEP 9: Reading headline numbers from 3_Savings_Model")
+print("=" * 60)
+
+# Row indices (0-based) confirmed from sheet inspection:
+#   Row 11: Lever 1 total row  → col 5 = L1 savings
+#   Row 22: Lever 2 total row  → col 5 = L2 savings
+#   Row 33: Lever 3 total row  → col 5 = L3 savings
+#   Row 41: Lever 4 savings    → col 1
+#   Row 48: Lever 5 savings    → col 1
+#   Row 58: Official target    → col 1
+#   Row 63: Sensitivity Low    → col 2
+#   Row 64: Sensitivity Base   → col 2
+#   Row 65: Sensitivity High   → col 2
+
+L1_savings     = float(sm_raw.iloc[11, 5])
+L2_savings     = float(sm_raw.iloc[22, 5])
+L3_savings     = float(sm_raw.iloc[33, 5])
+L4_savings     = float(sm_raw.iloc[41, 1])
+L5_savings     = float(sm_raw.iloc[48, 1])
+official_target = float(sm_raw.iloc[58, 1])
+sens_low       = float(sm_raw.iloc[63, 2])
+sens_base      = float(sm_raw.iloc[64, 2])
+sens_high      = float(sm_raw.iloc[65, 2])
+
+# Realization rates from Lever 1 table (rows 5-10, col 4)
+real_rates = {
+    "Open now":          {"Other": float(sm_raw.iloc[5, 4]),  "High risk": float(sm_raw.iloc[6, 4])},
+    "Renews this year":  {"Other": float(sm_raw.iloc[7, 4]),  "High risk": float(sm_raw.iloc[8, 4])},
+    "Locked (active)":   {"Other": float(sm_raw.iloc[9, 4]),  "High risk": float(sm_raw.iloc[10, 4])},
+}
+
+print(f"  L1: ${L1_savings/1e6:.2f}M  L2: ${L2_savings/1e6:.2f}M  L3: ${L3_savings/1e6:.2f}M")
+print(f"  L4: ${L4_savings/1e6:.3f}M  L5: ${L5_savings/1e6:.3f}M")
+print(f"  Official target: ${official_target/1e6:.3f}M")
+print(f"  Sensitivity: low=${sens_low/1e6:.1f}M  base=${sens_base/1e6:.1f}M  high=${sens_high/1e6:.1f}M")
+print(f"  Realization rates: {real_rates}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 10 — SUB-CATEGORY SPEND
 # ═══════════════════════════════════════════════════════════════════════════════
 
 subcat_spend = {}
-for subcat, grp in spend_raw.groupby("Sub-Category"):
-    subcat_spend[subcat] = {
-        "baseline":  round(float(grp["Spend (USD)"].sum()), 2),
-        "projected": round(float(grp["Projected Spend (USD)"].sum()), 2),
+for subcat, grp in calc.groupby("Sub-category"):
+    if pd.isna(subcat):
+        continue
+    subcat_spend[str(subcat)] = {
+        "baseline":  round(float(grp["Last-year spend"].sum()), 2),
+        "projected": round(float(grp["Projected spend"].sum()), 2),
     }
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSEMBLE AND WRITE OUTPUT
@@ -411,21 +473,36 @@ print("=" * 60)
 
 app_data = {
     "meta": {
+        # Spend totals
         "total_baseline_spend":  round(total_baseline, 2),
         "total_projected_spend": round(total_projected, 2),
-        "total_increase":        round(total_increase, 2),
-        "savings_ceiling":       round(savings_ceiling, 2),
+        "total_increase":        round(total_projected - total_baseline, 2),
+        # Savings
+        "savings_ceiling":       round(total_pool, 2),     # Case savings pool
+        "base_case_savings":     round(total_l1_3, 2),     # Levers 1-3
+        "official_target":       round(official_target, 2),# All 5 levers
+        "l1_savings":            round(L1_savings, 2),
+        "l2_savings":            round(L2_savings, 2),
+        "l3_savings":            round(L3_savings, 2),
+        "l4_savings":            round(L4_savings, 2),
+        "l5_savings":            round(L5_savings, 2),
+        # Sensitivity
+        "sensitivity_low":       round(sens_low, 2),
+        "sensitivity_base":      round(sens_base, 2),
+        "sensitivity_high":      round(sens_high, 2),
+        # Realization rates
+        "realization_rates":     real_rates,
+        # Supplier/segment metadata
         "supplier_count":        256,
-        "spend_threshold":       round(spend_threshold, 2),
-        "risk_threshold":        RISK_THRESHOLD,
+        "spend_threshold":       SPEND_THRESHOLD,
+        "risk_threshold":        RISK_HIGH_MIN,
+        "risk_low_max":          RISK_LOW_MAX,
         "segment_counts":        dict(segment_counts),
-        "capture_rates":         CAPTURE_RATES,
-        "base_case_savings":     round(base_case_savings, 2),
+        # Data quality log
         "cleaning_log":          cleaning_log,
     },
-    "suppliers": supplier_records,
-    "materials": mat_stats,
-    "savings_targets": {k: round(float(v), 6) for k, v in savings_lookup.items()},
+    "suppliers":        supplier_records,
+    "materials":        mat_stats,
     "subcategory_spend": subcat_spend,
 }
 
