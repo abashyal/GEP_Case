@@ -648,13 +648,17 @@ body {
       <div class="kpi-label">Savings Ceiling</div>
       <div class="kpi-value" id="kpi-ceiling">—</div>
     </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Savings Target</div>
+      <div class="kpi-value" id="kpi-target">—</div>
+    </div>
+    <div class="kpi-card kpi-red">
+      <div class="kpi-label">Remaining Gap</div>
+      <div class="kpi-value" id="kpi-gap">—</div>
+    </div>
     <div class="kpi-card kpi-live">
       <div class="kpi-label">Captured</div>
       <div class="kpi-value" id="kpi-captured">$0</div>
-    </div>
-    <div class="kpi-card kpi-live">
-      <div class="kpi-label">Gap Remaining</div>
-      <div class="kpi-value" id="kpi-gap">—</div>
     </div>
   </div>
 </header>
@@ -764,11 +768,11 @@ body {
       <div class="card-title">Savings Progress</div>
       <div style="display:flex; gap:40px; flex-wrap:wrap; margin-bottom:16px;">
         <div>
-          <div class="text-muted text-small">Total Projected Spend Increase</div>
-          <div style="font-size:1.5rem; font-weight:800;" id="tr-target">—</div>
+          <div class="text-muted text-small">Official Savings Target</div>
+          <div style="font-size:1.5rem; font-weight:800; color:var(--green);" id="tr-target">—</div>
         </div>
         <div>
-          <div class="text-muted text-small">Savings Ceiling (max possible)</div>
+          <div class="text-muted text-small">Case Savings Pool (ceiling)</div>
           <div style="font-size:1.5rem; font-weight:800; color:var(--orange);" id="tr-ceiling">—</div>
         </div>
         <div>
@@ -784,30 +788,37 @@ body {
       <!-- Progress bar -->
       <div class="progress-container" id="tr-progress-wrap">
         <div class="progress-bar-fill" id="tr-progress-bar" style="width:0%"></div>
+        <div class="progress-marker" id="tr-target-marker" style="left:0%">
+          <div class="progress-marker-label" style="color:var(--green);">$38.0M target</div>
+        </div>
         <div class="progress-marker" id="tr-ceiling-marker" style="left:0%">
           <div class="progress-marker-label">$47.0M ceiling</div>
         </div>
       </div>
       <div class="progress-label">
         <span>$0</span>
-        <span id="tr-progress-max">$51.7M target</span>
+        <span id="tr-progress-max">$51.7M (full increase)</span>
       </div>
 
       <div class="info-note mt-12">
-        Levers outside this dataset (specification changes, demand management, payment term optimization)
-        may close the remaining gap between the savings ceiling and the full increase.
+        Official target $38.0M covers 73% of the $51.7M projected increase. The $13.7M remaining gap
+        reflects levers not in this model (specification changes, demand management, payment term optimization).
       </div>
     </div>
 
-    <!-- Capture-rate presets -->
+    <!-- Sensitivity scenarios + five-lever breakdown -->
     <div class="card">
-      <div class="card-title">Capture Rate Presets</div>
+      <div class="card-title">Sensitivity Scenarios</div>
       <div class="info-note mb-8" style="margin-top:0;">
-        Applies a capture rate per segment to each supplier's savings ceiling to estimate realisable savings
-        under the current segmentation (thresholds above).
+        From 3_Savings_Model: all five levers scaled uniformly. Official target is the Base (×1.0) case.
       </div>
       <div class="preset-cards" id="preset-cards"></div>
-      <div id="preset-detail" style="font-size:0.82rem;color:var(--muted);"></div>
+      <div id="preset-detail" style="font-size:0.82rem;color:var(--muted);margin-top:8px;"></div>
+      <!-- Five-lever breakdown -->
+      <div style="margin-top:16px;">
+        <div style="font-weight:600;font-size:0.88rem;margin-bottom:8px;color:var(--secondary);">Five-Lever Breakdown (Base case)</div>
+        <div id="lever-breakdown-rows"></div>
+      </div>
     </div>
 
     <div class="card">
@@ -975,11 +986,13 @@ const LEVERS = {
 const TIER_COLORS   = { "Tier 1": "#EF6200", "Tier 2": "#F59E0B", "Tier 3": "#6E6E6E" };
 const REGION_COLORS = { APAC: "#EF6200", Europe: "#22C55E", LATAM: "#F59E0B", "North America": "#A78BFA" };
 
-// Capture-rate presets (ASSUMPTION: sourcing team estimates)
-const CAPTURE_PRESETS = {
-  ours:         { label: "Ours",         Leverage: 0.85, Negotiate: 0.60, "High risk": 0.50, Tail: 0.75 },
-  conservative: { label: "Conservative", Leverage: 0.80, Negotiate: 0.65, "High risk": 0.50, Tail: 0.40 },
-};
+// Sensitivity scenarios (from 3_Savings_Model — all levers scaled uniformly)
+// Amounts are populated from APP_DATA.meta at runtime; structure is fixed here.
+const SENSITIVITY_CASES = [
+  { key: "low",  label: "Low",  scale: "×0.75" },
+  { key: "base", label: "Base", scale: "×1.0 — official target" },
+  { key: "high", label: "High", scale: "×1.25" },
+];
 
 // Scenario definitions (ASSUMPTION: country/category filter rules)
 const SCENARIOS = {
@@ -1128,13 +1141,13 @@ function switchTab(tabId) {
 function updateKpis() {
   const m   = APP_DATA.meta;
   const cap = totalApproved();
-  const gap = m.total_increase - cap;
   document.getElementById("kpi-baseline").textContent  = fmt.M(m.total_baseline_spend);
   document.getElementById("kpi-projected").textContent = fmt.M(m.total_projected_spend);
   document.getElementById("kpi-increase").textContent  = "+" + fmt.M(m.total_increase);
   document.getElementById("kpi-ceiling").textContent   = fmt.M(m.savings_ceiling);
+  document.getElementById("kpi-target").textContent    = fmt.M(m.official_target);
+  document.getElementById("kpi-gap").textContent       = fmt.M(m.total_increase - m.official_target);
   document.getElementById("kpi-captured").textContent  = fmt.M(cap);
-  document.getElementById("kpi-gap").textContent       = fmt.M(gap);
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -1256,15 +1269,30 @@ function renderTierRegionSummary() {
 }
 
 function renderConcentrationAlert() {
-  const sups    = APP_DATA.suppliers;
-  const dmSups  = sups.filter(s => s.main_category === "Direct Materials");
-  const dmTotal = dmSups.reduce((sum, s) => sum + s.projected_spend, 0);
+  const sups     = APP_DATA.suppliers;
   const allTotal = sups.reduce((sum, s) => sum + s.projected_spend, 0);
 
+  // Compute DM spend from each supplier's per-transaction spend_category_mix
+  // (not from main_category, which only captures the dominant category per supplier)
+  let dmTotal = 0;
   const byRegion = {};
-  dmSups.forEach(s => {
-    byRegion[s.main_region] = (byRegion[s.main_region] || 0) + s.projected_spend;
+  sups.forEach(s => {
+    const dmSpend = (s.spend_category_mix || {})["Direct Materials"] || 0;
+    if (dmSpend > 0) {
+      dmTotal += dmSpend;
+      byRegion[s.main_region] = (byRegion[s.main_region] || 0) + dmSpend;
+    }
   });
+
+  // Check against expected values
+  const EXP_DM   = 128_500_000;
+  const EXP_LATAM = 53_900_000;
+  const tolerance = 500_000;
+  const dmOk   = Math.abs(dmTotal   - EXP_DM)   < tolerance;
+  const latOk  = Math.abs((byRegion.LATAM || 0) - EXP_LATAM) < tolerance;
+  const checkBadge = (dmOk && latOk)
+    ? `<span style="color:var(--green);font-size:0.78rem;font-weight:700;margin-left:8px;">✓ totals verified</span>`
+    : `<span style="color:var(--red);font-size:0.78rem;font-weight:700;margin-left:8px;">⚠ totals mismatch</span>`;
   const sorted = Object.entries(byRegion).sort((a, b) => b[1] - a[1]);
 
   const CONC_COLORS = { LATAM: "#F59E0B", APAC: "#EF6200", Europe: "#22C55E", "North America": "#A78BFA" };
@@ -1294,7 +1322,7 @@ function renderConcentrationAlert() {
     </div>
     <div style="font-size:0.82rem;color:var(--muted);margin-bottom:10px;">
       Direct Materials total projected spend: <strong>${fmt.M(dmTotal)}</strong>
-      &nbsp;(${(dmTotal / allTotal * 100).toFixed(1)}% of all spend)
+      &nbsp;(${(dmTotal / allTotal * 100).toFixed(1)}% of all spend)${checkBadge}
     </div>
     ${bars}
   `;
@@ -1411,11 +1439,12 @@ function renderKraljicChart() {
     },
   ];
 
+  // Labels pinned to chart edges (yref:"paper") so they never overlap dots
   const annotations = [
-    { x: (4 + riskLowMax) / 2,                             y: state.spendThreshold * 1.5,  text: "LEVERAGE",   showarrow: false, font: { color: "#EF6200", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
-    { x: (riskLowMax + state.riskThreshold) / 2,           y: state.spendThreshold * 1.5,  text: "NEGOTIATE",  showarrow: false, font: { color: "#F59E0B", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
-    { x: (4 + state.riskThreshold) / 2,                    y: state.spendThreshold * 0.25, text: "TAIL",       showarrow: false, font: { color: "#6E6E6E", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
-    { x: state.riskThreshold + 2,                          y: state.spendThreshold * 0.9,  text: "HIGH RISK",  showarrow: false, font: { color: "#E05252", size: 11, family: "Poppins, sans-serif" }, xref: "x", yref: "y", opacity: 0.7 },
+    { x: (4 + riskLowMax) / 2,                   y: 0.97, xref: "x", yref: "paper", text: "LEVERAGE",  showarrow: false, font: { color: "#EF6200", size: 10, family: "Poppins, sans-serif" }, xanchor: "center", yanchor: "top", opacity: 0.75 },
+    { x: (riskLowMax + state.riskThreshold) / 2,  y: 0.97, xref: "x", yref: "paper", text: "NEGOTIATE", showarrow: false, font: { color: "#F59E0B", size: 10, family: "Poppins, sans-serif" }, xanchor: "center", yanchor: "top", opacity: 0.75 },
+    { x: (4 + state.riskThreshold) / 2,           y: 0.04, xref: "x", yref: "paper", text: "TAIL",      showarrow: false, font: { color: "#6E6E6E", size: 10, family: "Poppins, sans-serif" }, xanchor: "center", yanchor: "bottom", opacity: 0.75 },
+    { x: state.riskThreshold + 2,                 y: 0.5,  xref: "x", yref: "paper", text: "HIGH RISK", showarrow: false, font: { color: "#E05252", size: 10, family: "Poppins, sans-serif" }, xanchor: "center", yanchor: "middle", opacity: 0.75 },
   ];
 
   const layout = {
@@ -1791,44 +1820,56 @@ function undoDecision(supId) {
   if (state.activeTab === "tracker") renderTracker();
 }
 
-// ── Capture Presets ───────────────────────────────────────────────────────────
-function computePresetSavings(presetKey) {
-  const rates = CAPTURE_PRESETS[presetKey];
-  return APP_DATA.suppliers.reduce((sum, s) => {
-    const seg  = getSegment(s);
-    const rate = rates[seg] || 0;
-    return sum + s.savings_ceiling * rate;
-  }, 0);
-}
-
+// ── Sensitivity Scenarios ─────────────────────────────────────────────────────
 function renderPresetCards() {
   const el = document.getElementById("preset-cards");
   if (!el) return;
-  el.innerHTML = Object.entries(CAPTURE_PRESETS).map(([key, p]) => {
-    const savings = computePresetSavings(key);
-    const rateStr = `L:${(p.Leverage*100).toFixed(0)}% / N:${(p.Negotiate*100).toFixed(0)}% / H:${(p["High risk"]*100).toFixed(0)}% / T:${(p.Tail*100).toFixed(0)}%`;
-    const isActive = state.activePreset === key;
-    return `<div class="preset-card ${isActive ? "active" : ""}" onclick="selectPreset('${key}')">
-      <div class="pc-label">${p.label}</div>
-      <div class="pc-savings">${fmt.M(savings)}</div>
-      <div class="pc-rates">${rateStr}</div>
+  const m = APP_DATA.meta;
+  const amounts = { low: m.sensitivity_low, base: m.sensitivity_base, high: m.sensitivity_high };
+
+  el.innerHTML = SENSITIVITY_CASES.map(c => {
+    const amt = amounts[c.key];
+    const isActive = state.activePreset === c.key;
+    return `<div class="preset-card ${isActive ? "active" : ""}" onclick="selectPreset('${c.key}')">
+      <div class="pc-label">${c.label}</div>
+      <div class="pc-savings">${fmt.M(amt)}</div>
+      <div class="pc-rates">${c.scale}</div>
     </div>`;
   }).join("");
 
-  // Detail row
+  // Detail line when a case is selected
   if (state.activePreset) {
-    const p = CAPTURE_PRESETS[state.activePreset];
-    const segs = ["Leverage", "Negotiate", "High risk", "Tail"];
-    const breakdown = segs.map(seg => {
-      const sups   = APP_DATA.suppliers.filter(s => getSegment(s) === seg);
-      const ceil   = sups.reduce((s, x) => s + x.savings_ceiling, 0);
-      const saving = ceil * p[seg];
-      return `${seg}: ${fmt.M(saving)} (${(p[seg]*100).toFixed(0)}% × ${fmt.M(ceil)} ceiling)`;
-    }).join(" &nbsp;·&nbsp; ");
-    document.getElementById("preset-detail").innerHTML = breakdown;
+    const sc = SENSITIVITY_CASES.find(c => c.key === state.activePreset);
+    const amt = amounts[state.activePreset];
+    document.getElementById("preset-detail").textContent =
+      `${sc.label} case (${sc.scale}): ${fmt.M(amt)} total savings across all five levers`;
   } else {
-    document.getElementById("preset-detail").innerHTML = "";
+    document.getElementById("preset-detail").textContent = "";
   }
+
+  // Five-lever breakdown (always visible)
+  const levers = [
+    ["L1", "Price harmonization",   m.l1_savings],
+    ["L2", "Inflation pushback",    m.l2_savings],
+    ["L3", "Competitive bidding",   m.l3_savings],
+    ["L4", "Tier 1 volume rebate",  m.l4_savings],
+    ["L5", "Catalog buying",        m.l5_savings],
+  ];
+  const totalLevers = levers.reduce((s, [,, v]) => s + v, 0);
+  const lrows = levers.map(([tag, label, val]) =>
+    `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #2A2A2A;font-size:0.85rem;">
+       <span><strong style="color:var(--blue);font-family:'Poppins',sans-serif;">${tag}</strong>
+         &nbsp;<span style="color:var(--secondary);">${label}</span></span>
+       <span style="font-weight:700;">${fmt.M(val)}</span>
+     </div>`
+  ).join("");
+
+  const lrEl = document.getElementById("lever-breakdown-rows");
+  if (lrEl) lrEl.innerHTML = lrows +
+    `<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:0.88rem;">
+       <span style="font-weight:700;color:var(--green);">Total (official target)</span>
+       <span style="font-weight:700;color:var(--green);">${fmt.M(totalLevers)}</span>
+     </div>`;
 }
 
 function selectPreset(key) {
@@ -1841,22 +1882,32 @@ function renderTracker() {
   const m        = APP_DATA.meta;
   const approved = Object.values(state.decisions).filter(d => d.status !== "rejected");
   const total    = approved.reduce((s, d) => s + d.amount, 0);
-  const target   = m.total_increase;
-  const ceiling  = m.savings_ceiling;
+  const scale    = m.total_increase;   // $51.7M — full bar scale
+  const target   = m.official_target; // $38.0M
+  const ceiling  = m.savings_ceiling; // $47.0M
 
   document.getElementById("tr-target").textContent   = fmt.M(target);
   document.getElementById("tr-ceiling").textContent  = fmt.M(ceiling);
   document.getElementById("tr-approved").textContent = fmt.M(total);
   document.getElementById("tr-count").textContent    = approved.length;
 
-  const pct = clamp(total / target * 100, 0, 100);
+  // Progress bar fills toward the full increase scale
+  const pct = clamp(total / scale * 100, 0, 100);
   document.getElementById("tr-progress-bar").style.width = pct + "%";
 
-  const ceilingPct = clamp(ceiling / target * 100, 0, 100);
-  const marker = document.getElementById("tr-ceiling-marker");
-  marker.style.left = ceilingPct + "%";
-  marker.querySelector(".progress-marker-label").textContent = fmt.M(ceiling) + " ceiling";
-  document.getElementById("tr-progress-max").textContent = fmt.M(target) + " (full increase)";
+  // Target marker at $38.0M
+  const targetPct = clamp(target / scale * 100, 0, 100);
+  const tMarker = document.getElementById("tr-target-marker");
+  tMarker.style.left = targetPct + "%";
+  tMarker.querySelector(".progress-marker-label").textContent = fmt.M(target) + " target";
+
+  // Ceiling marker at $47.0M
+  const ceilingPct = clamp(ceiling / scale * 100, 0, 100);
+  const cMarker = document.getElementById("tr-ceiling-marker");
+  cMarker.style.left = ceilingPct + "%";
+  cMarker.querySelector(".progress-marker-label").textContent = fmt.M(ceiling) + " ceiling";
+
+  document.getElementById("tr-progress-max").textContent = fmt.M(scale) + " (full increase)";
 
   const all = Object.entries(state.decisions);
   if (!all.length) {
@@ -2032,7 +2083,7 @@ function renderScenarioPanel() {
   const scen     = SCENARIOS[state.activeScenario];
   const affected = APP_DATA.suppliers.filter(scen.filter);
 
-  panelTitle.textContent = scen.icon + " " + scen.label + " — " + affected.length + " suppliers affected";
+  panelTitle.textContent = scen.icon + " " + scen.label + " — " + affected.length + (affected.length === 1 ? " supplier" : " suppliers") + " affected";
 
   const totalAtRisk = affected.reduce((s, sup) => s + sup.projected_spend, 0);
 
@@ -2203,9 +2254,10 @@ function renderReconciliation() {
   const sumCeiling   = sups.reduce((s, x) => s + x.savings_ceiling, 0);
   const suppCount    = sups.length;
 
-  // Preset savings
-  const oursSavings  = computePresetSavings("ours");
-  const consrSavings = computePresetSavings("conservative");
+  // Sensitivity amounts (from meta, no capture-rate computation needed)
+  const sensLow  = m.sensitivity_low;
+  const sensBase = m.sensitivity_base;
+  const sensHigh = m.sensitivity_high;
 
   function row(label, expected, actual, tolerance, fmtFn) {
     const pass  = Math.abs(actual - expected) <= (tolerance || 0.5);
@@ -2276,16 +2328,22 @@ function renderReconciliation() {
             <td><span style="color:var(--green);font-weight:700;">from 3_Savings_Model</span></td>
           </tr>
           <tr style="background:#1A1A1A;">
-            <td style="font-weight:600;">Savings — Ours preset (ceiling × rate)</td>
+            <td style="font-weight:600;">Sensitivity — Low (×0.75)</td>
+            <td style="font-family:monospace;">${fmt.M(sensLow)}</td>
             <td style="font-family:monospace;">—</td>
-            <td style="font-family:monospace;">${fmt.M(oursSavings)}</td>
-            <td><span style="color:var(--muted);">L:85% / N:60% / H:50% / T:75%</span></td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
           </tr>
           <tr style="background:#1A1A1A;">
-            <td style="font-weight:600;">Savings — Conservative preset</td>
+            <td style="font-weight:600;">Sensitivity — Base (×1.0)</td>
+            <td style="font-family:monospace;">${fmt.M(sensBase)}</td>
             <td style="font-family:monospace;">—</td>
-            <td style="font-family:monospace;">${fmt.M(consrSavings)}</td>
-            <td><span style="color:var(--muted);">L:80% / N:65% / H:50% / T:40%</span></td>
+            <td><span style="color:var(--muted);">= official target</span></td>
+          </tr>
+          <tr style="background:#1A1A1A;">
+            <td style="font-weight:600;">Sensitivity — High (×1.25)</td>
+            <td style="font-family:monospace;">${fmt.M(sensHigh)}</td>
+            <td style="font-family:monospace;">—</td>
+            <td><span style="color:var(--muted);">from 3_Savings_Model</span></td>
           </tr>
         </tbody>
       </table>
